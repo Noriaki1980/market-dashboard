@@ -23,7 +23,10 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
+      # 待ち行列に入った実行でも、起動時点の古いコミットではなく最新の main を取る
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-python@v5
         with:
@@ -41,11 +44,18 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/market.json
-          if git diff --cached --quiet; then
-            echo "no changes"
-          else
+          for attempt in 1 2 3; do
+            git add data/market.json
+            if git diff --cached --quiet; then
+              echo "no changes"; exit 0
+            fi
             git commit -m "data: update market.json ($(date -u +%Y-%m-%dT%H:%MZ))"
-            git pull --rebase origin main
-            git push
-          fi
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "push rejected (main moved) -> sync to latest main and re-fetch (attempt $attempt)"
+            git fetch origin main
+            git reset --hard origin/main
+            python scripts/fetch_data.py
+          done
+          echo "failed to push after 3 attempts"; exit 1
