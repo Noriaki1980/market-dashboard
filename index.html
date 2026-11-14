@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Market Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+JP:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js"></script>
+<style>
+:root{
+  --bg:#08101f; --surface:#0f1a2e; --surface-2:#14223b; --line:#1f3150; --line-2:#2a3f63;
+  --text:#e8edf5; --text-2:#a9b5c9; --muted:#6f7f99;
+  --amber:#ffb547; --amber-dim:#7a5a24;
+  --up:#3ccf7a; --down:#ff6b6b; --flat:#8a94a6;
+  --pf:#eef2f8; --bench:#8a94a6;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans JP","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);-webkit-text-size-adjust:100%}
+body{padding:16px;max-width:1280px;margin:0 auto}
+a{color:var(--amber)}
+.mono{font-family:var(--mono)}
+header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 16px;margin-bottom:14px;border-bottom:1px solid var(--line);padding-bottom:10px}
+header h1{font-family:var(--mono);font-size:18px;letter-spacing:.12em;margin:0;color:var(--amber);font-weight:600}
+header .meta{font-family:var(--mono);font-size:12px;color:var(--text-2)}
+.banner{font-size:13px;padding:8px 12px;border:1px solid var(--amber-dim);background:#1d1a12;color:#ffd99a;border-radius:6px;margin-bottom:12px}
+.banner:empty{display:none}
+section{margin-bottom:18px}
+h2{font-family:var(--mono);font-size:13px;letter-spacing:.14em;color:var(--text-2);margin:0 0 10px;font-weight:500;text-transform:uppercase}
+h2 .jp{font-family:var(--sans);letter-spacing:.04em;text-transform:none;margin-left:6px;color:var(--muted)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px}
+
+/* market cards */
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:900px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px 6px;cursor:pointer;text-align:left;color:inherit;font:inherit;display:block;width:100%;position:relative}
+.card:hover{border-color:var(--line-2)}
+.card[aria-pressed="true"]{border-color:var(--amber);box-shadow:inset 0 0 0 1px var(--amber)}
+.card .nm{font-size:12px;color:var(--text-2);display:flex;justify-content:space-between;gap:6px}
+.card .nm .sym{font-family:var(--mono);color:var(--muted);font-size:11px}
+.card .px{font-family:var(--mono);font-size:22px;font-weight:500;margin:2px 0 0;letter-spacing:.01em}
+.card .chg{font-family:var(--mono);font-size:12px;display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:2px}
+.card .chg span{white-space:nowrap}
+.card .chg .lb{color:var(--muted);margin-right:3px}
+.card .spark{height:36px;margin-top:4px}
+@media (max-width:520px){.card .px{font-size:18px}.card{padding:8px 10px 6px}}
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)}
+
+/* controls */
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-bottom:10px}
+.toolbar .title{font-size:15px;font-weight:600;margin-right:auto}
+.toolbar .title .sub{font-family:var(--mono);font-size:12px;color:var(--text-2);font-weight:400;margin-left:8px}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden}
+.seg button{background:transparent;border:0;color:var(--text-2);font-family:var(--mono);font-size:12px;padding:6px 10px;cursor:pointer;min-height:32px}
+.seg button+button{border-left:1px solid var(--line-2)}
+.seg button[aria-pressed="true"]{background:var(--amber);color:#1a1205;font-weight:600}
+label.chk{font-size:13px;color:var(--text-2);display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+select,input[type=text],input[type=date]{background:var(--surface-2);color:var(--text);border:1px solid var(--line-2);border-radius:6px;padding:6px 8px;font-family:var(--mono);font-size:13px;min-height:32px}
+input[type=date]{color-scheme:dark}
+.btn{background:var(--surface-2);color:var(--text);border:1px solid var(--line-2);border-radius:6px;padding:6px 12px;font-size:13px;cursor:pointer;min-height:32px;font-family:var(--sans)}
+.btn:hover{border-color:var(--amber)}
+.btn.primary{background:var(--amber);color:#1a1205;border-color:var(--amber);font-weight:600}
+.btn.small{padding:3px 8px;min-height:26px;font-size:12px}
+.chartbox{position:relative;height:340px}
+.chartbox.tall{height:440px}
+@media (max-width:520px){.chartbox{height:260px}.chartbox.tall{height:360px}}
+input[type=number]{background:var(--surface-2);color:var(--text);border:1px solid var(--line-2);border-radius:6px;padding:6px 8px;font-family:var(--mono);font-size:13px;min-height:32px}
+td input[type=number]{min-height:28px;padding:3px 6px;font-size:12px;width:92px;text-align:right}
+tr.sum td{background:var(--surface-2);font-weight:500}
+tr.sum td:first-child{background:var(--surface-2)}
+.stats{display:flex;flex-wrap:wrap;gap:6px 18px;font-family:var(--mono);font-size:12px;color:var(--text-2);margin-top:8px}
+.stats b{color:var(--text);font-weight:500}
+
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
+@media (max-width:760px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi .v{font-size:18px}}
+.kpi{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.kpi .lb{font-size:12px;color:var(--text-2)}
+.kpi .v{font-family:var(--mono);font-size:22px;font-weight:500;margin-top:2px}
+.kpi .s{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* tables */
+.tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right}
+th{font-weight:500;color:var(--text-2);font-size:12px;background:var(--surface-2);position:sticky;top:0}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1}
+th:first-child{background:var(--surface-2);z-index:2}
+td.num{font-family:var(--mono)}
+tr:last-child td{border-bottom:0}
+.swatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.tag{font-family:var(--mono);font-size:10px;padding:1px 5px;border-radius:3px;border:1px solid var(--amber-dim);color:var(--amber);margin-left:6px}
+.tag.local{border-color:var(--line-2);color:var(--text-2)}
+td .sub{display:block;font-size:11px;color:var(--muted);font-family:var(--mono)}
+td input[type=date]{min-height:28px;padding:3px 6px;font-size:12px}
+
+.addform{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0 4px}
+.addform input[type=text]{width:140px}
+.addform input.nm{width:180px}
+.hint{font-size:12px;color:var(--muted);line-height:1.6}
+.row2{display:grid;grid-template-columns:1fr;gap:12px}
+details summary{cursor:pointer;color:var(--text-2);font-size:13px}
+pre.cfg{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:10px;font-size:12px;overflow:auto;max-height:240px}
+footer{font-size:12px;color:var(--muted);line-height:1.7;border-top:1px solid var(--line);padding-top:10px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--amber);color:#1a1205;padding:8px 14px;border-radius:6px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:10}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>MARKET&nbsp;DASHBOARD</h1>
+  <div class="meta" id="meta">読み込み中…</div>
+</header>
+<div class="banner" id="banner"></div>
+
+<section id="markets">
+  <h2>Markets<span class="jp">直近値・前日比・前週末比</span></h2>
+  <div class="cards" id="cards"></div>
+</section>
+
+<section id="market-chart" class="panel">
+  <div class="toolbar">
+    <div class="title" id="mc-title">—</div>
+    <div class="seg" id="mc-range" role="group" aria-label="期間">
+      <button data-v="1M">1M</button><button data-v="3M">3M</button><button data-v="6M">6M</button><button data-v="YTD">YTD</button><button data-v="1Y">1Y</button><button data-v="2Y">2Y</button>
+    </div>
+    <div class="seg" id="mc-freq" role="group" aria-label="足種">
+      <button data-v="D">日足</button><button data-v="W">週足</button>
+    </div>
+  </div>
+  <div class="chartbox"><canvas id="mc-canvas" aria-label="選択した指標の推移"></canvas></div>
+  <div class="stats" id="mc-stats"></div>
+</section>
+
+<section id="portfolio">
+  <h2>Portfolio<span class="jp">基準日からのパフォーマンス</span></h2>
+  <div class="panel">
+    <div class="toolbar">
+      <div class="seg" id="pf-freq" role="group" aria-label="集計単位">
+        <button data-v="D">日次</button><button data-v="W">週次</button>
+      </div>
+      <div class="seg" id="pf-weight" role="group" aria-label="加重方法">
+        <button data-v="shares">株数加重</button><button data-v="equal">等金額</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="pf-jpy"> 円換算</label>
+      <label class="chk">比較
+        <select id="pf-bench">
+          <option value="">なし</option>
+          <option value="^N225">日経平均</option>
+          <option value="^GSPC">S&amp;P500</option>
+          <option value="^DJI">NYダウ</option>
+        </select>
+      </label>
+      <label class="chk"><input type="checkbox" id="pf-lines"> 銘柄ごとの線</label>
+    </div>
+
+    <div class="kpis" id="pf-kpis"></div>
+    <div class="chartbox"><canvas id="pf-canvas" aria-label="ポートフォリオ指数の推移"></canvas></div>
+    <p class="hint" id="pf-note"></p>
+
+    <h2 style="margin-top:16px">Holdings<span class="jp">銘柄</span></h2>
+    <div class="tablewrap"><table id="pf-table"></table></div>
+
+    <form class="addform" id="pf-add" autocomplete="off">
+      <input type="text" id="add-sym" placeholder="銘柄コード 例 7203 / AAPL" aria-label="銘柄コード" required>
+      <input type="text" id="add-name" class="nm" placeholder="表示名（任意）" aria-label="表示名">
+      <input type="number" id="add-shares" placeholder="保有株数" aria-label="保有株数" min="0" step="any" style="width:110px">
+      <input type="date" id="add-date" aria-label="基準日">
+      <button class="btn primary" type="submit">＋ 追加</button>
+    </form>
+    <p class="hint">4桁/英数4文字の日本株コードは自動で <span class="mono">.T</span> を付けます。追加・削除・基準日の変更はこのブラウザに保存されます。新しい銘柄の価格は <span class="mono">config/portfolio.json</span> に反映して push すると次回の取得から表示されます。</p>
+    <div class="toolbar" style="margin-top:6px">
+      <button class="btn" id="btn-export" type="button">設定JSONをコピー</button>
+      <button class="btn" id="btn-download" type="button">portfolio.json を保存</button>
+      <a class="btn" id="btn-edit" target="_blank" rel="noopener" style="text-decoration:none;display:none">GitHubで編集</a>
+      <button class="btn" id="btn-reset" type="button">リポジトリの設定に戻す</button>
+    </div>
+
+  </div>
+</section>
+
+<section id="riskreturn">
+  <h2>Risk / Return<span class="jp">年率リスク・リターンと効率的フロンティア（空売りなし）</span></h2>
+  <div class="panel">
+    <div class="toolbar">
+      <label class="chk">推計期間</label>
+      <div class="seg" id="rr-look" role="group" aria-label="推計期間">
+        <button data-v="6M">6M</button><button data-v="1Y">1Y</button><button data-v="2Y">2Y</button><button data-v="BASE">基準日〜</button>
+      </div>
+      <div class="seg" id="rr-freq" role="group" aria-label="リターンの単位">
+        <button data-v="W">週次</button><button data-v="D">日次</button>
+      </div>
+      <label class="chk">無リスク金利 <input type="number" id="rr-rf" step="0.1" min="-5" max="20" style="width:76px"> %</label>
+    </div>
+    <div class="chartbox tall"><canvas id="rr-canvas" aria-label="リスク・リターン散布図と効率的フロンティア"></canvas></div>
+    <p class="hint" id="rr-note"></p>
+    <div class="tablewrap"><table id="rr-table"></table></div>
+    <p class="hint" style="margin-top:8px">期待リターン・リスクは過去リターンの平均・標準偏差を年率換算した推計値（週次×52、日次×252）で、将来を保証するものではありません。フロンティアは同じ期間のデータで最適化しているため、実際より良く見えやすい点に注意してください。</p>
+  </div>
+</section>
+
+<footer id="foot"></footer>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+"use strict";
+/* ---------- constants ---------- */
+const DATA_URL = "data/market.json";
+const CONFIG_URL = "config/portfolio.json";
+const LS_PF = "mdash.portfolio.v1";
+const LS_PREF = "mdash.prefs.v1";
+const FX_FOR = { USD: "JPY=X", EUR: "EURJPY=X", GBP: "GBPJPY=X", AUD: "AUDJPY=X" };
+// 系列色（ダーク面で検証済みの8色・固定順）
+const SERIES = ["#3987e5","#d95926","#199e70","#c98500","#d55181","#0ca30c","#9085e9","#e66767"];
+const OVERFLOW = "#5d6b82";
+const css = getComputedStyle(document.documentElement);
+const C = k => css.getPropertyValue(k).trim();
+
+/* ---------- storage (best effort) ---------- */
+const store = {
+  get(k){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch { return null; } },
+  set(k,v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  del(k){ try { localStorage.removeItem(k); } catch {} },
+};
+const prefs = Object.assign({ sel: "^N225", range: "3M", mfreq: "D", pfreq: "D", jpy: false, bench: "^N225", lines: false, weight: "shares", rrLook: "1Y", rrFreq: "W", rf: 0 }, store.get(LS_PREF) || {});
+const savePrefs = () => store.set(LS_PREF, prefs);
+
+/* ---------- utils ---------- */
+const $ = id => document.getElementById(id);
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+  }
+  for (const c of kids) if (c != null) e.append(c);
+  return e;
+};
+const fmtN = (v, d) => v == null || !isFinite(v) ? "—" : v.toLocaleString("ja-JP", { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtP = (r, d = 2) => r == null || !isFinite(r) ? "—" : (r > 0 ? "+" : r < 0 ? "−" : "±") + Math.abs(r * 100).toFixed(d) + "%";
+const fmtA = (v, d) => v == null || !isFinite(v) ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "±") + fmtN(Math.abs(v), d);
+const cls = r => r == null || !isFinite(r) || Math.abs(r) < 1e-12 ? "flat" : r > 0 ? "up" : "down";
+const arrow = r => r == null || !isFinite(r) || Math.abs(r) < 1e-12 ? "" : r > 0 ? "▲" : "▼";
+const autoDigits = v => { const a = Math.abs(v); return a >= 1000 ? 1 : a >= 100 ? 2 : a >= 1 ? 3 : 5; };
+const parseD = s => new Date(s + "T00:00:00Z");
+const isoD = d => d.toISOString().slice(0, 10);
+const weekKey = s => { const d = parseD(s); const wd = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - wd); return isoD(d); };
+const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+const toast = msg => { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 1800); };
+// 日付配列から「d 以前で最後のインデックス」
+function idxOnOrBefore(dates, d) {
+  let lo = 0, hi = dates.length - 1, ans = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (dates[m] <= d) { ans = m; lo = m + 1; } else hi = m - 1; }
+  return ans;
+}
+const valueAt = (s, d) => { const i = idxOnOrBefore(s.dates, d); return i < 0 ? null : s.close[i]; };
+function normSymbol(raw) {
+  let s = raw.trim().toUpperCase().replace(/\s+/g, "");
+  if (/^[0-9][0-9A-Z]{3}$/.test(s)) s += ".T";
+  return s;
+}
+
+/* ---------- state ---------- */
+let DATA = null, CONFIG = { default_base_date: null, holdings: [] }, PF = null;
+let mcChart = null, pfChart = null; const sparks = {};
+
+function loadPortfolio() {
+  const local = store.get(LS_PF);
+  PF = local && Array.isArray(local.holdings) ? local : JSON.parse(JSON.stringify(CONFIG));
+  PF.default_base_date = PF.default_base_date || CONFIG.default_base_date || todayISO();
+}
+const isLocalEdited = () => !!store.get(LS_PF);
+function savePortfolio() { store.set(LS_PF, PF); }
+const configSymbols = () => new Set((CONFIG.holdings || []).map(h => h.symbol));
+
+/* ---------- chart common ---------- */
+const crosshair = {
+  id: "crosshair",
+  afterDatasetsDraw(chart) {
+    const a = chart.tooltip && chart.tooltip.getActiveElements();
+    if (!a || !a.length) return;
+    const x = a[0].element.x, { top, bottom } = chart.chartArea, ctx = chart.ctx;
+    ctx.save(); ctx.strokeStyle = "rgba(169,181,201,.45)"; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); ctx.restore();
+  }
+};
+function baseOptions() {
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false, normalized: true,
+    interaction: { mode: "index", intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: "#0b1424", borderColor: C("--line-2"), borderWidth: 1, titleColor: C("--text"), bodyColor: C("--text"),
+        titleFont: { family: "IBM Plex Mono", size: 12 }, bodyFont: { family: "IBM Plex Mono", size: 12 }, padding: 10, boxPadding: 4, usePointStyle: true,
+      },
+    },
+    scales: {
+      x: { grid: { display: false }, border: { color: C("--line-2") }, ticks: { color: C("--muted"), font: { family: "IBM Plex Mono", size: 11 }, maxRotation: 0, autoSkip: true, maxTicksLimit: innerWidth < 600 ? 4 : 7, callback(v) { const l = this.getLabelForValue(v); return typeof l === "string" && l.length === 10 ? l.slice(2).replace(/-/g, "/") : l; } } },
+      y: { position: "right", grid: { color: "rgba(42,63,99,.45)" }, border: { display: false }, ticks: { color: C("--muted"), font: { family: "IBM Plex Mono", size: 11 }, maxTicksLimit: 6 } },
+    },
+    elements: { point: { radius: 0, hoverRadius: 4, hitRadius: 8 }, line: { borderWidth: 2, tension: 0 } },
+  };
+}
+
+/* ---------- market metrics ---------- */
+function metrics(s) {
+  const n = s.dates.length; if (!n) return null;
+  const last = s.close[n - 1], lastD = s.dates[n - 1];
+  const prev = n > 1 ? s.close[n - 2] : null;
+  const wk = weekKey(lastD); let pw = null;
+  for (let i = n - 1; i >= 0; i--) if (s.dates[i] < wk) { pw = s.close[i]; break; }
+  const yStart = lastD.slice(0, 4) + "-01-01"; let py = null;
+  for (let i = n - 1; i >= 0; i--) if (s.dates[i] < yStart) { py = s.close[i]; break; }
+  return { last, lastD, prev, dChg: prev != null ? last - prev : null, d: prev ? last / prev - 1 : null, w: pw ? last / pw - 1 : null, ytd: py ? last / py - 1 : null };
+}
+function sliceRange(s, range) {
+  const n = s.dates.length; if (!n) return { dates: [], close: [] };
+  const lastD = parseD(s.dates[n - 1]); let from;
+  if (range === "YTD") from = s.dates[n - 1].slice(0, 4) + "-01-01";
+  else { const m = { "1M": 1, "3M": 3, "6M": 6, "1Y": 12, "2Y": 24 }[range] || 3; const d = new Date(lastD); d.setUTCMonth(d.getUTCMonth() - m); from = isoD(d); }
+  let i0 = s.dates.findIndex(d => d >= from); if (i0 < 0) i0 = 0;
+  if (range !== "YTD" && i0 > 0) i0 -= 1; // 起点を含める
+  return { dates: s.dates.slice(i0), close: s.close.slice(i0) };
+}
+function toWeekly(dates, vals) {
+  const od = [], ov = [];
+  for (let i = 0; i < dates.length; i++) {
+    const last = i === dates.length - 1 || weekKey(dates[i + 1]) !== weekKey(dates[i]);
+    if (last) { od.push(dates[i]); ov.push(vals[i]); }
+  }
+  return { dates: od, vals: ov };
+}
+
+/* ---------- render: market cards ---------- */
+function renderCards() {
+  const box = $("cards"); box.replaceChildren();
+  for (const sym of DATA.markets) {
+    const s = DATA.series[sym]; const dg = (DATA.market_meta[sym] || {}).digits ?? 2;
+    const card = el("button", { class: "card", type: "button", "aria-pressed": String(prefs.sel === sym), id: "card-" + sym.replace(/[^A-Za-z0-9]/g, "_") });
+    if (!s || !s.dates.length) { card.append(el("div", { class: "nm", text: sym }), el("div", { class: "px", text: "—" })); box.append(card); continue; }
+    const m = metrics(s);
+    card.append(
+      el("div", { class: "nm" }, el("span", { text: s.name }), el("span", { class: "sym", text: `${sym} · ${m.lastD.slice(5).replace("-", "/")}${s.stale ? "(旧)" : ""}` })),
+      el("div", { class: "px", text: fmtN(m.last, dg) }),
+      el("div", { class: "chg" },
+        el("span", { class: cls(m.d) }, el("span", { class: "lb", text: "前日" }), `${arrow(m.d)}${fmtA(m.dChg, dg)} (${fmtP(m.d)})`),
+        el("span", { class: cls(m.w) }, el("span", { class: "lb", text: "前週末" }), fmtP(m.w)),
+      ),
+      el("div", { class: "spark" }, el("canvas", { "aria-hidden": "true" })),
+    );
+    card.addEventListener("click", () => { prefs.sel = sym; savePrefs(); document.querySelectorAll(".card").forEach(c => c.setAttribute("aria-pressed", "false")); card.setAttribute("aria-pressed", "true"); renderMarketChart(); if (innerWidth < 900) $("market-chart").scrollIntoView({ behavior: "smooth", block: "start" }); });
+    box.append(card);
+    // sparkline: 直近3か月
+    const r = sliceRange(s, "3M");
+    const up = r.close[r.close.length - 1] >= r.close[0];
+    if (sparks[sym]) sparks[sym].destroy();
+    sparks[sym] = new Chart(card.querySelector("canvas"), {
+      type: "line",
+      data: { labels: r.dates, datasets: [{ data: r.close, borderColor: up ? C("--up") : C("--down"), borderWidth: 1.5, pointRadius: 0, fill: false }] },
+      options: { responsive: true, maintainAspectRatio: false, animation: false, events: [], plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false } } },
+    });
+  }
+}
+
+/* ---------- render: market chart ---------- */
+function renderMarketChart() {
+  const s = DATA.series[prefs.sel]; if (!s) return;
+  const dg = (DATA.market_meta[prefs.sel] || {}).digits ?? autoDigits(s.close[s.close.length - 1]);
+  let r = sliceRange(s, prefs.range); let dates = r.dates, vals = r.close;
+  if (prefs.mfreq === "W") { const w = toWeekly(dates, vals); dates = w.dates; vals = w.vals; }
+  const m = metrics(s);
+  $("mc-title").replaceChildren(document.createTextNode(s.name), el("span", { class: "sub", text: `${prefs.sel}  ${fmtN(m.last, dg)}  (${m.lastD})` }));
+  const first = vals[0], last = vals[vals.length - 1], chg = first ? last / first - 1 : null;
+  const hi = Math.max(...vals), lo = Math.min(...vals);
+  $("mc-stats").replaceChildren(
+    el("span", {}, "期間騰落 ", el("b", { class: cls(chg), text: fmtP(chg) })),
+    el("span", {}, "高値 ", el("b", { text: fmtN(hi, dg) })),
+    el("span", {}, "安値 ", el("b", { text: fmtN(lo, dg) })),
+    el("span", {}, "年初来 ", el("b", { class: cls(m.ytd), text: fmtP(m.ytd) })),
+    el("span", {}, "本数 ", el("b", { text: String(vals.length) })),
+  );
+  const color = C("--amber");
+  const opts = baseOptions();
+  opts.plugins.tooltip.callbacks = { label: ctx => ` ${fmtN(ctx.parsed.y, dg)}  (${fmtP(first ? ctx.parsed.y / first - 1 : null)})` };
+  opts.scales.y.ticks.callback = v => fmtN(v, dg >= 3 ? Math.min(dg, 3) : 0);
+  const data = { labels: dates, datasets: [{ label: s.name, data: vals, borderColor: color, backgroundColor: ctx => { const { chartArea, ctx: c } = ctx.chart; if (!chartArea) return "transparent"; const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom); g.addColorStop(0, "rgba(255,181,71,.18)"); g.addColorStop(1, "rgba(255,181,71,0)"); return g; }, fill: true, pointStyle: "line" }] };
+  if (mcChart) { mcChart.data = data; mcChart.options = opts; mcChart.update(); }
+  else mcChart = new Chart($("mc-canvas"), { type: "line", data, options: opts, plugins: [crosshair] });
+  setSeg("mc-range", prefs.range); setSeg("mc-freq", prefs.mfreq);
+}
+
+/* ---------- portfolio computation ---------- */
+function convSeries(sym) {
+  // 円換算時は価格×為替（日付ごとに直近の為替レート）
+  const s = DATA.series[sym]; if (!s) return null;
+  if (!prefs.jpy || s.currency === "JPY") return { dates: s.dates, close: s.close, currency: s.currency, converted: false };
+  const fx = DATA.series[FX_FOR[s.currency]];
+  if (!fx) return { dates: s.dates, close: s.close, currency: s.currency, converted: false, unconvertible: true };
+  const out = []; const ds = [];
+  for (let i = 0; i < s.dates.length; i++) { const r = valueAt(fx, s.dates[i]); if (r != null) { ds.push(s.dates[i]); out.push(s.close[i] * r); } }
+  return { dates: ds, close: out, currency: "JPY", converted: true };
+}
+const fxLatest = cur => { if (cur === "JPY") return 1; const f = DATA.series[FX_FOR[cur]]; return f && f.close.length ? f.close[f.close.length - 1] : null; };
+const sharesOf = h => { const v = +h.shares; return isFinite(v) && v > 0 ? v : 0; };
+const useShares = () => prefs.weight === "shares" && PF.holdings.some(h => sharesOf(h) > 0 && DATA.series[h.symbol]);
+
+function computePortfolio() {
+  const rows = []; const byShares = useShares();
+  PF.holdings.forEach((h, i) => {
+    const s = convSeries(h.symbol);
+    const base = h.base_date || PF.default_base_date;
+    const row = { h, i, base, color: i < SERIES.length ? SERIES[i] : OVERFLOW, s, ok: false, shares: sharesOf(h) };
+    if (s && s.dates.length) {
+      let bi = idxOnOrBefore(s.dates, base); if (bi < 0) bi = 0;
+      row.bi = bi; row.effBase = s.dates[bi]; row.bp = s.close[bi];
+      const n = s.dates.length; row.last = s.close[n - 1]; row.lastD = s.dates[n - 1];
+      row.since = row.last / row.bp - 1;
+      row.d = n - 1 > bi ? row.last / s.close[n - 2] - 1 : null;
+      const wk = weekKey(row.lastD); let pw = null;
+      for (let k = n - 1; k >= bi; k--) if (s.dates[k] < wk) { pw = s.close[k]; break; }
+      row.w = pw != null ? row.last / pw - 1 : (row.effBase < wk ? null : row.since);
+      const raw = DATA.series[h.symbol];
+      row.ok = true; row.origCur = raw.currency;
+      row.lastLocal = raw.close[raw.close.length - 1];
+      const fx = fxLatest(raw.currency);
+      row.pxJPY = fx != null ? row.lastLocal * fx : null;       // 現在の円建て株価
+      row.mv = row.pxJPY != null ? row.shares * row.pxJPY : null; // 円建て評価額
+      // 合算の単位: 円換算ON→系列が円建て / OFF→現在の為替レートで固定換算（為替変動を含めない）
+      row.unit = s.converted || raw.currency === "JPY" ? 1 : (fx ?? 1);
+    }
+    rows.push(row);
+  });
+  const okRows = rows.filter(r => r.ok);
+  const inPF = byShares ? okRows.filter(r => r.shares > 0) : okRows;
+  if (!inPF.length) return { rows, dates: [], index: [], okRows, byShares };
+  const start = inPF.reduce((m, r) => r.effBase < m ? r.effBase : m, inPF[0].effBase);
+  const cal = new Set();
+  okRows.forEach(r => { for (let k = r.bi; k < r.s.dates.length; k++) cal.add(r.s.dates[k]); });
+  const dates = [...cal].filter(d => d >= start).sort();
+  okRows.forEach(r => {
+    // norm: 基準日=1 の相対値（前方補完）、agg: 合算用の値
+    r.norm = dates.map(d => d < r.effBase ? null : valueAt(r.s, d) / r.bp);
+    r.agg = byShares ? r.norm.map(x => x == null || !r.shares ? null : x * r.bp * r.shares * r.unit) : r.norm;
+  });
+  const index = [100];
+  for (let t = 1; t < dates.length; t++) {
+    let num = 0, den = 0;
+    for (const r of okRows) { const a = r.agg[t - 1], b = r.agg[t]; if (a != null && b != null) { num += b; den += a; } }
+    index.push(den > 0 ? index[t - 1] * num / den : index[t - 1]);
+  }
+  return { rows, dates, index, okRows, byShares };
+}
+
+/* ---------- render: portfolio ---------- */
+let lastP = null;
+function renderPortfolio() {
+  setSeg("pf-freq", prefs.pfreq);
+  $("pf-jpy").checked = prefs.jpy; $("pf-bench").value = prefs.bench; $("pf-lines").checked = prefs.lines;
+  const P = computePortfolio(); lastP = P;
+  setSeg("pf-weight", P.byShares ? "shares" : "equal");
+  const { rows, dates, index } = P;
+  const okRows = P.okRows || [];
+
+  // KPIs
+  const kp = $("pf-kpis"); kp.replaceChildren();
+  const n = index.length;
+  const since = n ? index[n - 1] / 100 - 1 : null;
+  const dRet = n > 1 ? index[n - 1] / index[n - 2] - 1 : null;
+  let wRet = null;
+  if (n) { const wk = weekKey(dates[n - 1]); let pi = -1; for (let i = n - 1; i >= 0; i--) if (dates[i] < wk) { pi = i; break; } wRet = index[n - 1] / (pi >= 0 ? index[pi] : 100) - 1; }
+  const kpi = (lb, v, sub, c) => kp.append(el("div", { class: "kpi" }, el("div", { class: "lb", text: lb }), el("div", { class: "v " + (c || ""), text: v }), el("div", { class: "s", text: sub })));
+  kpi("基準日来", fmtP(since), n ? `${dates[0]} → ${dates[n - 1]}` : "データなし", cls(since));
+  kpi("直近 日次", fmtP(dRet), n > 1 ? `${dates[n - 2]} 比` : "—", cls(dRet));
+  kpi("今週（前週末比）", fmtP(wRet), n ? `週初 ${weekKey(dates[n - 1])}` : "—", cls(wRet));
+  const held = okRows.filter(r => r.shares > 0 && r.mv != null);
+  if (held.length) {
+    const tot = held.reduce((s, r) => s + r.mv, 0);
+    kpi("評価額（円）", "¥" + fmtN(tot, 0), `${held.length}銘柄 · 外貨は最新レートで換算`, "");
+  } else {
+    const best = okRows.slice().sort((a, b) => b.since - a.since);
+    kpi("ベスト / ワースト", best.length ? `${fmtP(best[0].since, 1)} / ${fmtP(best[best.length - 1].since, 1)}` : "—", best.length ? `${best[0].h.name || best[0].h.symbol} / ${best[best.length - 1].h.name || best[best.length - 1].h.symbol}` : "", "");
+  }
+
+  // chart
+  let cd = dates, ci = index;
+  if (prefs.pfreq === "W" && dates.length) { const w = toWeekly(dates, index); cd = [dates[0], ...w.dates.filter(d => d !== dates[0])]; ci = cd.map(d => index[dates.indexOf(d)]); }
+  const pick = arr => cd.map(d => arr[dates.indexOf(d)]);
+  const datasets = [{ label: "ポートフォリオ", data: ci, borderColor: C("--pf"), borderWidth: 3, pointStyle: "line", order: 0 }];
+  if (prefs.bench && DATA.series[prefs.bench] && cd.length) {
+    const bs = convSeries(prefs.bench); const b0 = valueAt(bs, cd[0]);
+    if (b0) datasets.push({ label: DATA.series[prefs.bench].name + (bs.converted ? "（円）" : ""), data: cd.map(d => { const v = valueAt(bs, d); return v != null ? v / b0 * 100 : null; }), borderColor: C("--bench"), borderDash: [5, 4], borderWidth: 1.5, pointStyle: "line", order: 2 });
+  }
+  if (prefs.lines) okRows.forEach(r => datasets.push({ label: r.h.name || r.h.symbol, data: pick(r.norm).map(x => x == null ? null : x * 100), borderColor: r.color, borderWidth: 1.5, pointStyle: "line", order: 1, spanGaps: false }));
+  const opts = baseOptions();
+  opts.plugins.legend = { display: datasets.length > 1, position: "top", align: "start", labels: { color: C("--text-2"), font: { family: "IBM Plex Sans JP", size: 12 }, usePointStyle: true, pointStyle: "line", boxWidth: 18 } };
+  opts.plugins.tooltip.callbacks = { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y == null ? "—" : ctx.parsed.y.toFixed(2)} (${fmtP(ctx.parsed.y / 100 - 1)})` };
+  opts.scales.y.ticks.callback = v => v.toFixed(0);
+  const data = { labels: cd, datasets };
+  if (pfChart) { pfChart.data = data; pfChart.options = opts; pfChart.update(); }
+  else pfChart = new Chart($("pf-canvas"), { type: "line", data, options: opts, plugins: [crosshair, baseLine] });
+
+  const unconv = rows.filter(r => r.s && r.s.unconvertible).map(r => r.h.symbol);
+  const method = P.byShares
+    ? "株数加重：保有株数で各銘柄の基準日から保有したものとして計算（株数0の銘柄は含めない）。"
+    : (prefs.weight === "shares" ? "保有株数が未入力のため等金額で計算。" : "") + "等金額：各銘柄をそれぞれの基準日の終値で同じ金額だけ組み入れたものとして計算。";
+  $("pf-note").textContent = "指数＝100：最初の基準日。" + method + "配当は含まない。" +
+    (prefs.jpy ? "円換算：各日の終値×その日以前で直近の為替終値。" : (P.byShares ? "現地通貨建て（外貨銘柄は最新レートで固定換算して合算）。" : "現地通貨建て。")) +
+    (unconv.length ? ` 円換算できない通貨: ${unconv.join(", ")}` : "");
+
+  renderHoldingsTable(rows);
+  renderRiskReturn();
+}
+const baseLine = {
+  id: "baseLine",
+  beforeDatasetsDraw(chart) {
+    const y = chart.scales.y; if (!y) return; const py = y.getPixelForValue(100);
+    if (py < chart.chartArea.top || py > chart.chartArea.bottom) return;
+    const ctx = chart.ctx; ctx.save(); ctx.strokeStyle = "rgba(169,181,201,.35)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(chart.chartArea.left, py); ctx.lineTo(chart.chartArea.right, py); ctx.stroke(); ctx.restore();
+  }
+};
+
+function renderHoldingsTable(rows) {
+  const t = $("pf-table"); t.replaceChildren();
+  const cfg = configSymbols();
+  const tot = rows.reduce((s, r) => s + (r.ok && r.mv ? r.mv : 0), 0);
+  t.append(el("thead", {}, el("tr", {},
+    ...["銘柄", "基準日比", "前日比", "前週末比", "現在値", "保有株数", "評価額（円）", "構成比", "基準値", "基準日", ""].map(h => el("th", { text: h })))));
+  const tb = el("tbody");
+  rows.forEach(r => {
+    const nameCell = el("td", {},
+      el("span", { class: "swatch", style: `background:${r.color}` }),
+      document.createTextNode(r.h.name || r.h.symbol),
+      cfg.has(r.h.symbol) ? null : el("span", { class: "tag local", text: "ローカル" }),
+      el("span", { class: "sub", text: r.h.symbol + (r.ok ? ` · ${r.origCur}${r.s.converted ? "→JPY" : ""}` : "") }));
+    const dateIn = el("input", { type: "date", value: r.base, "aria-label": `${r.h.symbol} の基準日` });
+    dateIn.addEventListener("change", () => { if (!dateIn.value) return; PF.holdings[r.i].base_date = dateIn.value; savePortfolio(); renderPortfolio(); syncConfigView(); });
+    const shIn = el("input", { type: "number", min: "0", step: "any", inputmode: "decimal", value: r.shares ? String(r.shares) : "", placeholder: "0", "aria-label": `${r.h.symbol} の保有株数` });
+    shIn.addEventListener("change", () => { const v = +shIn.value; PF.holdings[r.i].shares = isFinite(v) && v > 0 ? v : 0; savePortfolio(); renderPortfolio(); syncConfigView(); });
+    const del = el("button", { class: "btn small", type: "button", text: "削除", "aria-label": `${r.h.symbol} を削除` });
+    del.addEventListener("click", () => { PF.holdings.splice(r.i, 1); savePortfolio(); renderPortfolio(); syncConfigView(); toast(`${r.h.symbol} を削除しました`); });
+    if (!r.ok) {
+      tb.append(el("tr", {}, nameCell,
+        el("td", { colspan: "4", style: "text-align:left;color:var(--muted);font-size:12px", text: "価格データ未取得 — config/portfolio.json に追加して push" }),
+        el("td", {}, shIn), el("td", {}), el("td", {}), el("td", {}), el("td", {}, dateIn), el("td", {}, del)));
+      return;
+    }
+    const dg = autoDigits(r.last);
+    const baseCell = el("td", { class: "num" }, fmtN(r.bp, dg), r.effBase !== r.base ? el("span", { class: "sub", text: r.effBase }) : null);
+    tb.append(el("tr", {}, nameCell,
+      el("td", { class: "num " + cls(r.since), style: "font-weight:600", text: fmtP(r.since) }),
+      el("td", { class: "num " + cls(r.d), text: fmtP(r.d) }),
+      el("td", { class: "num " + cls(r.w), text: fmtP(r.w) }),
+      el("td", { class: "num" }, fmtN(r.last, dg), el("span", { class: "sub", text: r.lastD })),
+      el("td", {}, shIn),
+      el("td", { class: "num", text: r.shares && r.mv != null ? fmtN(r.mv, 0) : "—" }),
+      el("td", { class: "num", text: r.shares && r.mv != null && tot ? (r.mv / tot * 100).toFixed(1) + "%" : "—" }),
+      baseCell, el("td", {}, dateIn),
+      el("td", {}, del)));
+  });
+  if (!rows.length) tb.append(el("tr", {}, el("td", { colspan: "11", style: "text-align:left;color:var(--muted)", text: "銘柄がありません。下のフォームから追加してください。" })));
+  else if (tot) tb.append(el("tr", { class: "sum" }, el("td", { text: "合計" }), el("td", {}), el("td", {}), el("td", {}), el("td", {}), el("td", {}),
+    el("td", { class: "num", text: fmtN(tot, 0) }), el("td", { class: "num", text: "100.0%" }), el("td", {}), el("td", {}), el("td", {})));
+  t.append(tb);
+}
+
+/* ---------- risk / return ---------- */
+function projSimplex(v) {
+  const u = [...v].sort((a, b) => b - a); let css = 0, theta = 0;
+  for (let i = 0; i < u.length; i++) { css += u[i]; const t = (css - 1) / (i + 1); if (u[i] - t > 0) theta = t; }
+  return v.map(x => Math.max(0, x - theta));
+}
+const matVec = (S, w) => S.map(row => { let s = 0; for (let j = 0; j < w.length; j++) s += row[j] * w[j]; return s; });
+const dot = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; };
+// 制約: Σw=1, w≥0。lam=Infinity で最小分散、それ以外は max μ'w − lam·w'Σw（加速射影勾配法）
+function optimize(mu, S, lam, w0) {
+  const n = mu.length, minVar = !isFinite(lam);
+  const L = Math.max(1e-12, ...S.map(r => r.reduce((s, x) => s + Math.abs(x), 0)));
+  const step = minVar ? 1 / (2 * L) : 1 / (2 * lam * L);
+  let w = w0 ? w0.slice() : new Array(n).fill(1 / n), y = w.slice(), tk = 1;
+  for (let it = 0; it < 6000; it++) {
+    const Sy = matVec(S, y);
+    const g = minVar ? Sy.map(x => 2 * x) : Sy.map((x, i) => 2 * lam * x - mu[i]);
+    const wn = projSimplex(y.map((x, i) => x - step * g[i]));
+    const tn = (1 + Math.sqrt(1 + 4 * tk * tk)) / 2;
+    y = wn.map((x, i) => x + ((tk - 1) / tn) * (x - w[i]));
+    let diff = 0; for (let i = 0; i < n; i++) diff = Math.max(diff, Math.abs(wn[i] - w[i]));
+    w = wn; tk = tn;
+    if (it > 30 && diff < 1e-11) break;
+  }
+  return w;
+}
+const pstats = (w, mu, S, rf) => { const r = dot(w, mu), s = Math.sqrt(Math.max(0, dot(w, matVec(S, w)))); return { w, r, s, sh: s > 0 ? (r - rf) / s : null }; };
+
+function sampleReturns(series, dates) {
+  const px = dates.map(d => valueAt(series, d)); const out = [];
+  for (let t = 1; t < px.length; t++) out.push(px[t] != null && px[t - 1] ? px[t] / px[t - 1] - 1 : 0);
+  return out;
+}
+function rrCompute(P) {
+  const assets = P.okRows || [];
+  if (assets.length < 2) return { err: "効率的フロンティアには価格データのある銘柄が2つ以上必要です。" };
+  const freq = prefs.rrFreq, A = freq === "W" ? 52 : 252;
+  const lastD = assets.reduce((m, r) => r.lastD > m ? r.lastD : m, assets[0].lastD);
+  let from;
+  if (prefs.rrLook === "BASE") from = assets.reduce((m, r) => r.effBase < m ? r.effBase : m, assets[0].effBase);
+  else { const mo = { "6M": 6, "1Y": 12, "2Y": 24 }[prefs.rrLook] || 12; const d = parseD(lastD); d.setUTCMonth(d.getUTCMonth() - mo); from = isoD(d); }
+  const firstAvail = assets.reduce((m, r) => r.s.dates[0] > m ? r.s.dates[0] : m, "0000-00-00");
+  const start = from > firstAvail ? from : firstAvail;
+  const cal = new Set(); assets.forEach(r => r.s.dates.forEach(d => { if (d >= start && d <= lastD) cal.add(d); }));
+  let dates = [...cal].sort();
+  if (freq === "W") dates = dates.filter((d, i) => i === 0 || i === dates.length - 1 || weekKey(dates[i + 1]) !== weekKey(d));
+  const T = dates.length - 1, n = assets.length;
+  if (T < Math.max(8, n + 2)) return { err: `推計に使えるデータが少なすぎます（${Math.max(T, 0)}期間）。期間を延ばすか、日次に切り替えてください。` };
+  const R = assets.map(r => sampleReturns(r.s, dates));
+  const m = R.map(a => a.reduce((s, x) => s + x, 0) / T);
+  const mu = m.map(x => x * A);
+  const S = Array.from({ length: n }, () => new Array(n).fill(0));
+  for (let i = 0; i < n; i++) for (let j = i; j < n; j++) {
+    let c = 0; for (let t = 0; t < T; t++) c += (R[i][t] - m[i]) * (R[j][t] - m[j]);
+    S[i][j] = S[j][i] = c / (T - 1) * A;
+  }
+  const rf = (+prefs.rf || 0) / 100;
+  const single = assets.map((r, i) => ({ r: mu[i], s: Math.sqrt(S[i][i]), sh: S[i][i] > 0 ? (mu[i] - rf) / Math.sqrt(S[i][i]) : null }));
+
+  // 現在のウェイト
+  let wCur, curLabel;
+  const mvs = assets.map(r => r.shares > 0 ? (r.mv ?? r.shares * r.lastLocal) : 0);
+  const mvTot = mvs.reduce((s, x) => s + x, 0);
+  if (P.byShares && mvTot > 0) { wCur = mvs.map(x => x / mvTot); curLabel = "現在のPF"; }
+  else { wCur = new Array(n).fill(1 / n); curLabel = "現在のPF（等金額）"; }
+  const cur = pstats(wCur, mu, S, rf);
+
+  // フロンティア
+  const minV = pstats(optimize(mu, S, Infinity), mu, S, rf);
+  const lams = []; for (let k = 0; k <= 110; k++) lams.push(Math.pow(10, 5 - k * 8 / 110)); // 1e5 → 1e-3
+  const pts = [minV]; let w0 = minV.w;
+  for (const lam of lams) { const w = optimize(mu, S, lam, w0); w0 = w; pts.push({ ...pstats(w, mu, S, rf), lam }); }
+  const iMax = mu.indexOf(Math.max(...mu));
+  const corner = new Array(n).fill(0); corner[iMax] = 1; pts.push(pstats(corner, mu, S, rf));
+  const front = pts.filter(p => p.r >= minV.r - 1e-12).sort((a, b) => a.s - b.s)
+    .filter((p, i, a) => i === 0 || Math.abs(p.s - a[i - 1].s) > 1e-6 || Math.abs(p.r - a[i - 1].r) > 1e-6);
+  // 最大シャープ：グリッド最良点の近傍を黄金分割で詰める
+  let best = front.reduce((b, p) => (p.sh ?? -Infinity) > (b.sh ?? -Infinity) ? p : b, front[0]);
+  if (best.lam) {
+    let a = Math.log10(best.lam) - 0.08, b = Math.log10(best.lam) + 0.08; const gr = (Math.sqrt(5) - 1) / 2;
+    const f = x => pstats(optimize(mu, S, Math.pow(10, x), best.w), mu, S, rf);
+    for (let k = 0; k < 25; k++) { const c = b - gr * (b - a), d = a + gr * (b - a); if ((f(c).sh ?? -1e9) > (f(d).sh ?? -1e9)) b = d; else a = c; }
+    const cand = f((a + b) / 2); if ((cand.sh ?? -1e9) > (best.sh ?? -1e9)) best = cand;
+  }
+  // ランダムなポートフォリオ（参考の雲）
+  const cloud = []; let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  for (let k = 0; k < 1500; k++) { const g = assets.map(() => -Math.log(rnd() + 1e-12)); const s = g.reduce((x, y) => x + y, 0); const p = pstats(g.map(x => x / s), mu, S, rf); cloud.push({ x: p.s, y: p.r }); }
+
+  // ベンチマーク点
+  let bench = null;
+  if (prefs.bench && DATA.series[prefs.bench]) {
+    const bs = convSeries(prefs.bench); const br = sampleReturns(bs, dates); const bm = br.reduce((s, x) => s + x, 0) / T;
+    const bv = br.reduce((s, x) => s + (x - bm) ** 2, 0) / (T - 1);
+    bench = { name: DATA.series[prefs.bench].name + (bs.converted ? "（円）" : ""), r: bm * A, s: Math.sqrt(bv * A) };
+  }
+  return { assets, mu, S, rf, single, cur, curLabel, minV, best, front, cloud, bench, start: dates[0], end: dates[T], T, freq };
+}
+
+let rrChart = null;
+const pointLabels = {
+  id: "pointLabels",
+  afterDatasetsDraw(chart) {
+    const ctx = chart.ctx, ca = chart.chartArea; ctx.save(); ctx.font = "11px 'IBM Plex Sans JP', sans-serif"; ctx.textBaseline = "middle";
+    const placed = [], H = 14;
+    const hit = r => r.x < ca.left || r.x + r.w > ca.right || r.y < ca.top || r.y + r.h > ca.bottom || placed.some(q => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h);
+    // 重要度順（order が小さいものから）に配置し、重なれば右→左→上→下→右上→右下の順でずらす
+    const items = chart.data.datasets.map((ds, i) => ({ ds, i })).filter(o => o.ds.directLabel && chart.isDatasetVisible(o.i)).sort((a, b) => (a.ds.order || 0) - (b.ds.order || 0));
+    items.forEach(({ ds, i }) => {
+      const pt = chart.getDatasetMeta(i).data[0]; if (!pt) return;
+      placed.push({ x: pt.x - 7, y: pt.y - 7, w: 14, h: 14 }); // 点そのもの
+    });
+    items.forEach(({ ds, i }) => {
+      const pt = chart.getDatasetMeta(i).data[0]; if (!pt) return;
+      const w = ctx.measureText(ds.directLabel).width + 2;
+      const cands = [[pt.x + 10, pt.y - H / 2], [pt.x - 10 - w, pt.y - H / 2], [pt.x - w / 2, pt.y - 10 - H], [pt.x - w / 2, pt.y + 10], [pt.x + 8, pt.y - 8 - H], [pt.x + 8, pt.y + 8], [pt.x - 8 - w, pt.y - 8 - H], [pt.x - 8 - w, pt.y + 8]];
+      let r = null;
+      for (const [x, y] of cands) { const c = { x, y, w, h: H }; if (!hit(c)) { r = c; break; } }
+      if (!r) r = { x: cands[0][0], y: cands[0][1], w, h: H };
+      placed.push(r);
+      ctx.fillStyle = C("--text-2"); ctx.textAlign = "left"; ctx.fillText(ds.directLabel, r.x, r.y + H / 2);
+    });
+    ctx.restore();
+  }
+};
+function renderRiskReturn() {
+  setSeg("rr-look", prefs.rrLook); setSeg("rr-freq", prefs.rrFreq); $("rr-rf").value = prefs.rf;
+  const t = $("rr-table"); t.replaceChildren();
+  const X = lastP ? rrCompute(lastP) : { err: "データがありません" };
+  if (X.err) {
+    $("rr-note").textContent = X.err;
+    if (rrChart) { rrChart.destroy(); rrChart = null; }
+    return;
+  }
+  const pct = v => (v * 100).toFixed(1) + "%";
+  const ds = [];
+  ds.push({ label: "ランダムな組合せ", data: X.cloud, pointRadius: 1.4, pointHoverRadius: 1.4, backgroundColor: "rgba(169,181,201,.16)", borderWidth: 0, order: 9, noTip: true });
+  ds.push({ label: "効率的フロンティア", data: X.front.map(p => ({ x: p.s, y: p.r })), showLine: true, borderColor: C("--amber"), backgroundColor: C("--amber"), borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 0, pointStyle: "line", order: 5, noTip: true });
+  if (X.best.sh != null && X.best.s > 0) {
+    const xmax = Math.max(...X.single.map(p => p.s), X.cur.s, X.bench ? X.bench.s : 0) * 1.08;
+    ds.push({ label: "資本市場線", data: [{ x: 0, y: X.rf }, { x: xmax, y: X.rf + X.best.sh * xmax }], showLine: true, borderColor: "rgba(255,181,71,.45)", borderDash: [4, 4], borderWidth: 1, pointRadius: 0, pointHoverRadius: 0, pointStyle: "line", order: 6, noTip: true });
+  }
+  X.assets.forEach((r, i) => ds.push({ label: r.h.name || r.h.symbol, directLabel: r.h.name || r.h.symbol, data: [{ x: X.single[i].s, y: X.single[i].r }], backgroundColor: r.color, borderColor: C("--surface"), borderWidth: 2, pointRadius: 6, pointHoverRadius: 8, order: 2, sh: X.single[i].sh }));
+  if (X.bench) ds.push({ label: X.bench.name, directLabel: X.bench.name, data: [{ x: X.bench.s, y: X.bench.r }], pointStyle: "crossRot", borderColor: C("--bench"), backgroundColor: C("--bench"), borderWidth: 2, pointRadius: 7, pointHoverRadius: 9, order: 3, sh: X.bench.s ? (X.bench.r - X.rf) / X.bench.s : null });
+  ds.push({ label: "最小分散", directLabel: "最小分散", data: [{ x: X.minV.s, y: X.minV.r }], pointStyle: "rectRot", backgroundColor: C("--amber"), borderColor: C("--surface"), borderWidth: 2, pointRadius: 8, pointHoverRadius: 10, order: 1, sh: X.minV.sh });
+  ds.push({ label: "最大シャープ", directLabel: "最大シャープ", data: [{ x: X.best.s, y: X.best.r }], pointStyle: "triangle", backgroundColor: C("--amber"), borderColor: C("--surface"), borderWidth: 2, pointRadius: 9, pointHoverRadius: 11, order: 1, sh: X.best.sh });
+  ds.push({ label: X.curLabel, directLabel: X.curLabel, data: [{ x: X.cur.s, y: X.cur.r }], backgroundColor: C("--pf"), borderColor: C("--surface"), borderWidth: 2, pointRadius: 8, pointHoverRadius: 10, order: 0, sh: X.cur.sh });
+
+  const opts = baseOptions();
+  opts.interaction = { mode: "nearest", intersect: true };
+  opts.plugins.legend = { display: true, position: "top", align: "start", labels: { color: C("--text-2"), font: { family: "IBM Plex Sans JP", size: 12 }, usePointStyle: true, boxWidth: 10, filter: it => ["効率的フロンティア", "最小分散", "最大シャープ", X.curLabel, "資本市場線"].includes(it.text) } };
+  opts.plugins.tooltip.filter = it => !it.dataset.noTip;
+  opts.plugins.tooltip.callbacks = { title: items => items[0] ? items[0].dataset.label : "", label: ctx => [` リターン ${pct(ctx.parsed.y)}`, ` リスク ${pct(ctx.parsed.x)}`, ` シャープ ${ctx.dataset.sh == null ? "—" : ctx.dataset.sh.toFixed(2)}`] };
+  opts.scales.x = { type: "linear", min: 0, title: { display: true, text: "リスク（年率標準偏差）", color: C("--muted"), font: { size: 11 } }, grid: { color: "rgba(42,63,99,.35)" }, border: { color: C("--line-2") }, ticks: { color: C("--muted"), font: { family: "IBM Plex Mono", size: 11 }, callback: v => (v * 100).toFixed(0) + "%", maxTicksLimit: 7 } };
+  opts.scales.y = { type: "linear", position: "left", title: { display: true, text: "期待リターン（年率）", color: C("--muted"), font: { size: 11 } }, grid: { color: "rgba(42,63,99,.45)" }, border: { display: false }, ticks: { color: C("--muted"), font: { family: "IBM Plex Mono", size: 11 }, callback: v => (v * 100).toFixed(0) + "%", maxTicksLimit: 7 } };
+  const data = { datasets: ds };
+  if (rrChart) { rrChart.data = data; rrChart.options = opts; rrChart.update(); }
+  else rrChart = new Chart($("rr-canvas"), { type: "scatter", data, options: opts, plugins: [pointLabels] });
+
+  const curs = new Set(X.assets.map(r => r.origCur));
+  $("rr-note").textContent = `推計期間 ${X.start} 〜 ${X.end}・${X.T}期間（${X.freq === "W" ? "週次" : "日次"}）・${prefs.jpy ? "円建て（為替変動を含む）" : "現地通貨建て"}・空売りなし（各ウェイト0〜100%）。` +
+    (!prefs.jpy && curs.size > 1 ? " 通貨が混在しています。円換算をONにすると為替変動を含めた円ベースで比較できます。" : "") +
+    (X.freq === "D" && curs.size > 1 ? " 日米は取引時間がずれるため、相関の推計は週次の方が安定します。" : "");
+
+  // 表
+  const showShares = lastP.byShares;
+  const totMV = X.assets.reduce((s, r) => s + (r.shares > 0 && r.mv ? r.mv : 0), 0);
+  const heads = ["銘柄", "期待リターン", "リスク", "シャープ", "現在", "最小分散", "最大シャープ"];
+  if (showShares && totMV) heads.push("最大シャープの株数目安");
+  t.append(el("thead", {}, el("tr", {}, ...heads.map(h => el("th", { text: h })))));
+  const tb = el("tbody"); const wf = w => w < 0.0005 ? "—" : (w * 100).toFixed(1) + "%";
+  X.assets.forEach((r, i) => {
+    const cells = [
+      el("td", {}, el("span", { class: "swatch", style: `background:${r.color}` }), r.h.name || r.h.symbol),
+      el("td", { class: "num " + cls(X.single[i].r), text: fmtP(X.single[i].r, 1) }),
+      el("td", { class: "num", text: pct(X.single[i].s) }),
+      el("td", { class: "num", text: X.single[i].sh == null ? "—" : X.single[i].sh.toFixed(2) }),
+      el("td", { class: "num", text: wf(X.cur.w[i]) }),
+      el("td", { class: "num", text: wf(X.minV.w[i]) }),
+      el("td", { class: "num", text: wf(X.best.w[i]) }),
+    ];
+    if (showShares && totMV) {
+      let sh = r.pxJPY ? X.best.w[i] * totMV / r.pxJPY : null;
+      const lot = r.h.symbol.endsWith(".T") ? 100 : 1;
+      if (sh != null) sh = Math.round(sh / lot) * lot;
+      const diff = sh != null ? sh - r.shares : null;
+      cells.push(el("td", { class: "num" }, sh == null ? "—" : fmtN(sh, 0), sh == null ? null : el("span", { class: "sub", text: `現在比 ${diff > 0 ? "+" : diff < 0 ? "−" : "±"}${fmtN(Math.abs(diff), 0)}` })));
+    }
+    tb.append(el("tr", {}, ...cells));
+  });
+  const sumRow = (name, p) => {
+    const cells = [el("td", { text: name }), el("td", { class: "num " + cls(p.r), text: fmtP(p.r, 1) }), el("td", { class: "num", text: pct(p.s) }), el("td", { class: "num", text: p.sh == null ? "—" : p.sh.toFixed(2) }), el("td", {}), el("td", {}), el("td", {})];
+    if (showShares && totMV) cells.push(el("td", {}));
+    tb.append(el("tr", { class: "sum" }, ...cells));
+  };
+  sumRow(X.curLabel, X.cur); sumRow("最小分散", X.minV); sumRow("最大シャープ", X.best);
+  if (X.bench) sumRow(X.bench.name + "（参考）", { r: X.bench.r, s: X.bench.s, sh: X.bench.s ? (X.bench.r - X.rf) / X.bench.s : null });
+  t.append(tb);
+}
+
+/* ---------- config export ---------- */
+function exportJSON() {
+  return JSON.stringify({ default_base_date: PF.default_base_date, holdings: PF.holdings.map(h => ({ symbol: h.symbol, name: h.name || h.symbol, shares: sharesOf(h), base_date: h.base_date || PF.default_base_date })) }, null, 2) + "\n";
+}
+function syncConfigView() {
+  $("btn-reset").style.display = isLocalEdited() ? "" : "none";
+}
+function setupEditLink() {
+  const h = location.hostname;
+  if (!h.endsWith(".github.io")) return;
+  const user = h.replace(".github.io", ""); const seg = location.pathname.split("/").filter(Boolean)[0];
+  const repo = seg && !seg.includes(".") ? seg : h;
+  const a = $("btn-edit"); a.href = `https://github.com/${user}/${repo}/edit/main/config/portfolio.json`; a.style.display = "";
+}
+
+/* ---------- controls ---------- */
+function setSeg(id, v) { $(id).querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v))); }
+function bindSeg(id, key, fn) { $(id).addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; prefs[key] = b.dataset.v; savePrefs(); fn(); }); }
+function bindControls() {
+  bindSeg("mc-range", "range", renderMarketChart);
+  bindSeg("mc-freq", "mfreq", renderMarketChart);
+  bindSeg("pf-freq", "pfreq", renderPortfolio);
+  bindSeg("pf-weight", "weight", renderPortfolio);
+  bindSeg("rr-look", "rrLook", renderRiskReturn);
+  bindSeg("rr-freq", "rrFreq", renderRiskReturn);
+  $("rr-rf").addEventListener("change", e => { const v = parseFloat(e.target.value); prefs.rf = isFinite(v) ? v : 0; savePrefs(); renderRiskReturn(); });
+  $("pf-jpy").addEventListener("change", e => { prefs.jpy = e.target.checked; savePrefs(); renderPortfolio(); });
+  $("pf-bench").addEventListener("change", e => { prefs.bench = e.target.value; savePrefs(); renderPortfolio(); });
+  $("pf-lines").addEventListener("change", e => { prefs.lines = e.target.checked; savePrefs(); renderPortfolio(); });
+  $("add-date").value = PF.default_base_date;
+  $("pf-add").addEventListener("submit", e => {
+    e.preventDefault();
+    const sym = normSymbol($("add-sym").value); if (!sym) return;
+    if (PF.holdings.some(h => h.symbol === sym)) { toast(`${sym} は登録済みです`); return; }
+    const nm = $("add-name").value.trim() || (DATA.series[sym] && DATA.series[sym].name) || sym;
+    const shv = +$("add-shares").value;
+    PF.holdings.push({ symbol: sym, name: nm, shares: isFinite(shv) && shv > 0 ? shv : 0, base_date: $("add-date").value || PF.default_base_date });
+    savePortfolio(); renderPortfolio(); syncConfigView();
+    $("add-sym").value = ""; $("add-name").value = ""; $("add-shares").value = "";
+    toast(DATA.series[sym] ? `${sym} を追加しました` : `${sym} を追加（価格は未取得）`);
+  });
+  $("btn-export").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(exportJSON()); toast("portfolio.json の内容をコピーしました"); }
+    catch { prompt("コピーしてください", exportJSON()); }
+  });
+  $("btn-download").addEventListener("click", () => {
+    const a = el("a", { href: URL.createObjectURL(new Blob([exportJSON()], { type: "application/json" })), download: "portfolio.json" });
+    document.body.append(a); a.click(); a.remove();
+  });
+  $("btn-reset").addEventListener("click", () => {
+    if (!confirm("このブラウザでの変更を破棄して、リポジトリの config/portfolio.json に戻しますか？")) return;
+    store.del(LS_PF); loadPortfolio(); renderPortfolio(); syncConfigView(); toast("リポジトリの設定に戻しました");
+  });
+}
+
+/* ---------- boot ---------- */
+async function getJSON(url) { const r = await fetch(url + "?t=" + Date.now(), { cache: "no-store" }); if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.json(); }
+async function boot() {
+  try { DATA = await getJSON(DATA_URL); }
+  catch (e) {
+    $("meta").textContent = "データなし";
+    $("banner").textContent = "data/market.json を読み込めませんでした。GitHub の Actions タブで「Update market data」を手動実行（Run workflow）してください。 (" + e.message + ")";
+    return;
+  }
+  try { CONFIG = await getJSON(CONFIG_URL); } catch { CONFIG = { default_base_date: todayISO(), holdings: [] }; }
+  loadPortfolio();
+  if (!DATA.series[prefs.sel]) prefs.sel = DATA.markets[0];
+  const gen = new Date(DATA.generated_at);
+  $("meta").textContent = `更新 ${gen.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} JST · ${DATA.source}`;
+  const stale = Object.entries(DATA.series).filter(([, s]) => s.stale).map(([k]) => k);
+  const ageH = (Date.now() - gen.getTime()) / 3.6e6;
+  const msgs = [];
+  if (stale.length) msgs.push(`取得に失敗し前回値を表示中: ${stale.join(", ")}`);
+  if (ageH > 72) msgs.push(`データが ${Math.floor(ageH / 24)} 日前のものです。Actions の実行状況を確認してください。`);
+  $("banner").textContent = msgs.join(" / ");
+  $("foot").innerHTML = "";
+  $("foot").append(
+    el("div", { text: "出典: Yahoo Finance（yfinance 経由の日足終値）。市場が開いている時間帯の取得では、最終行はその時点の値（暫定）です。前週末比 = 直近値 ÷ 前週最終営業日の終値 − 1。" }),
+    el("div", { text: "投資判断の参考情報であり、正確性・完全性は保証されません。" }));
+  Chart.defaults.color = C("--text-2"); Chart.defaults.font.family = "IBM Plex Sans JP";
+  renderCards(); renderMarketChart(); bindControls(); renderPortfolio(); syncConfigView(); setupEditLink();
+}
+boot();
+})();
+</script>
+</body>
+</html>
