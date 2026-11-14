@@ -75,8 +75,8 @@ tr.sum td:first-child{background:var(--surface-2)}
 .stats b{color:var(--text);font-weight:500}
 
 /* KPI */
-.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
-@media (max-width:760px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi .v{font-size:18px}}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:12px}
+@media (max-width:760px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi .v{font-size:18px}.kpis .kpi:last-child:nth-child(odd){grid-column:1/-1}}
 .kpi{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
 .kpi .lb{font-size:12px;color:var(--text-2)}
 .kpi .v{font-family:var(--mono);font-size:22px;font-weight:500;margin-top:2px}
@@ -433,6 +433,12 @@ function computePortfolio() {
       row.mv = row.pxJPY != null ? row.shares * row.pxJPY : null; // 円建て評価額
       // 合算の単位: 円換算ON→系列が円建て / OFF→現在の為替レートで固定換算（為替変動を含めない）
       row.unit = s.converted || raw.currency === "JPY" ? 1 : (fx ?? 1);
+      // 基準日時点の円建て金額（株価・為替とも基準日の終値）と基準日来の損益
+      row.bpLocal = valueAt(raw, row.effBase);
+      const fxB = raw.currency === "JPY" ? 1 : (DATA.series[FX_FOR[raw.currency]] ? valueAt(DATA.series[FX_FOR[raw.currency]], row.effBase) : null);
+      row.cost = fx != null && fxB != null && row.bpLocal != null ? row.shares * row.bpLocal * fxB : null;
+      row.pl = row.cost != null && row.mv != null ? row.mv - row.cost : null;
+      row.plFx = row.pl != null && raw.currency !== "JPY" ? row.shares * row.lastLocal * (fx - fxB) : null; // うち為替要因
     }
     rows.push(row);
   });
@@ -481,7 +487,11 @@ function renderPortfolio() {
   const held = okRows.filter(r => r.shares > 0 && r.mv != null);
   if (held.length) {
     const tot = held.reduce((s, r) => s + r.mv, 0);
-    kpi("評価額（円）", "¥" + fmtN(tot, 0), `${held.length}銘柄 · 外貨は最新レートで換算`, "");
+    const withCost = held.filter(r => r.cost != null);
+    const cost = withCost.reduce((s, r) => s + r.cost, 0), pl = withCost.reduce((s, r) => s + r.pl, 0);
+    const plr = cost ? pl / cost : null;
+    kpi("損益（円・基準日来）", (pl > 0 ? "+" : pl < 0 ? "−" : "±") + "¥" + fmtN(Math.abs(pl), 0), `損益率 ${fmtP(plr)}`, cls(pl));
+    kpi("基準額 → 評価額", "¥" + fmtN(tot, 0), `基準額 ¥${fmtN(cost, 0)}`, "");
   } else {
     const best = okRows.slice().sort((a, b) => b.since - a.since);
     kpi("ベスト / ワースト", best.length ? `${fmtP(best[0].since, 1)} / ${fmtP(best[best.length - 1].since, 1)}` : "—", best.length ? `${best[0].h.name || best[0].h.symbol} / ${best[best.length - 1].h.name || best[best.length - 1].h.symbol}` : "", "");
@@ -511,7 +521,8 @@ function renderPortfolio() {
     : (prefs.weight === "shares" ? "保有株数が未入力のため等金額で計算。" : "") + "等金額：各銘柄をそれぞれの基準日の終値で同じ金額だけ組み入れたものとして計算。";
   $("pf-note").textContent = "指数＝100：最初の基準日。" + method + "配当は含まない。" +
     (prefs.jpy ? "円換算：各日の終値×その日以前で直近の為替終値。" : (P.byShares ? "現地通貨建て（外貨銘柄は最新レートで固定換算して合算）。" : "現地通貨建て。")) +
-    (unconv.length ? ` 円換算できない通貨: ${unconv.join(", ")}` : "");
+    (unconv.length ? ` 円換算できない通貨: ${unconv.join(", ")}` : "") +
+    " 損益＝評価額（直近の株価×最新の為替）− 基準額（基準日の終値×基準日の為替）。配当・手数料・税は含まない。";
 
   renderHoldingsTable(rows);
   renderRiskReturn();
@@ -531,7 +542,7 @@ function renderHoldingsTable(rows) {
   const cfg = configSymbols();
   const tot = rows.reduce((s, r) => s + (r.ok && r.mv ? r.mv : 0), 0);
   t.append(el("thead", {}, el("tr", {},
-    ...["銘柄", "基準日比", "前日比", "前週末比", "現在値", "保有株数", "評価額（円）", "構成比", "基準値", "基準日", ""].map(h => el("th", { text: h })))));
+    ...["銘柄", "基準日比", "前日比", "前週末比", "現在値", "保有株数", "基準額（円）", "評価額（円）", "損益（円）", "構成比", "基準値", "基準日", ""].map(h => el("th", { text: h })))));
   const tb = el("tbody");
   rows.forEach(r => {
     const nameCell = el("td", {},
@@ -548,7 +559,7 @@ function renderHoldingsTable(rows) {
     if (!r.ok) {
       tb.append(el("tr", {}, nameCell,
         el("td", { colspan: "4", style: "text-align:left;color:var(--muted);font-size:12px", text: "価格データ未取得 — config/portfolio.json に追加して push" }),
-        el("td", {}, shIn), el("td", {}), el("td", {}), el("td", {}), el("td", {}, dateIn), el("td", {}, del)));
+        el("td", {}, shIn), el("td", {}), el("td", {}), el("td", {}), el("td", {}), el("td", {}), el("td", {}, dateIn), el("td", {}, del)));
       return;
     }
     const dg = autoDigits(r.last);
@@ -559,14 +570,24 @@ function renderHoldingsTable(rows) {
       el("td", { class: "num " + cls(r.w), text: fmtP(r.w) }),
       el("td", { class: "num" }, fmtN(r.last, dg), el("span", { class: "sub", text: r.lastD })),
       el("td", {}, shIn),
-      el("td", { class: "num", text: r.shares && r.mv != null ? fmtN(r.mv, 0) : "—" }),
+      el("td", { class: "num" }, r.shares && r.cost != null ? fmtN(r.cost, 0) : "—", r.shares && r.cost != null && r.origCur !== "JPY" ? el("span", { class: "sub", text: `@${fmtN(valueAt(DATA.series[FX_FOR[r.origCur]], r.effBase), 2)}` }) : null),
+      el("td", { class: "num" }, r.shares && r.mv != null ? fmtN(r.mv, 0) : "—", r.shares && r.mv != null && r.origCur !== "JPY" ? el("span", { class: "sub", text: `@${fmtN(fxLatest(r.origCur), 2)}` }) : null),
+      el("td", { class: "num " + (r.shares && r.pl != null ? cls(r.pl) : "") }, r.shares && r.pl != null ? fmtA(r.pl, 0) : "—",
+        r.shares && r.plFx != null ? el("span", { class: "sub", text: `うち為替 ${fmtA(r.plFx, 0)}` }) : (r.shares && r.cost ? el("span", { class: "sub", text: fmtP(r.pl / r.cost) }) : null)),
       el("td", { class: "num", text: r.shares && r.mv != null && tot ? (r.mv / tot * 100).toFixed(1) + "%" : "—" }),
       baseCell, el("td", {}, dateIn),
       el("td", {}, del)));
   });
-  if (!rows.length) tb.append(el("tr", {}, el("td", { colspan: "11", style: "text-align:left;color:var(--muted)", text: "銘柄がありません。下のフォームから追加してください。" })));
-  else if (tot) tb.append(el("tr", { class: "sum" }, el("td", { text: "合計" }), el("td", {}), el("td", {}), el("td", {}), el("td", {}), el("td", {}),
-    el("td", { class: "num", text: fmtN(tot, 0) }), el("td", { class: "num", text: "100.0%" }), el("td", {}), el("td", {}), el("td", {})));
+  if (!rows.length) tb.append(el("tr", {}, el("td", { colspan: "13", style: "text-align:left;color:var(--muted)", text: "銘柄がありません。下のフォームから追加してください。" })));
+  else if (tot) {
+    const cr = rows.filter(r => r.ok && r.shares && r.cost != null && r.pl != null);
+    const cost = cr.reduce((s, r) => s + r.cost, 0), pl = cr.reduce((s, r) => s + r.pl, 0), plFx = cr.reduce((s, r) => s + (r.plFx || 0), 0);
+    tb.append(el("tr", { class: "sum" }, el("td", { text: "合計" }), el("td", {}), el("td", {}), el("td", {}), el("td", {}), el("td", {}),
+      el("td", { class: "num", text: fmtN(cost, 0) }),
+      el("td", { class: "num", text: fmtN(tot, 0) }),
+      el("td", { class: "num " + cls(pl) }, fmtA(pl, 0), el("span", { class: "sub", text: `${fmtP(cost ? pl / cost : null)}${plFx ? ` · うち為替 ${fmtA(plFx, 0)}` : ""}` })),
+      el("td", { class: "num", text: "100.0%" }), el("td", {}), el("td", {}), el("td", {})));
+  }
   t.append(tb);
 }
 
