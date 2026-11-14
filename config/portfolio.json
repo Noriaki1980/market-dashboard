@@ -1,9 +1,18 @@
 {
-  "default_base_date": "2026-01-05",
+  "default_base_date": "2026-10-01",
   "holdings": [
-    { "symbol": "7203.T", "name": "トヨタ自動車", "shares": 300, "base_date": "2026-01-05" },
-    { "symbol": "8306.T", "name": "三菱UFJ FG", "shares": 500, "base_date": "2026-01-05" },
-    { "symbol": "AAPL", "name": "Apple", "shares": 20, "base_date": "2026-01-05" },
-    { "symbol": "NVDA", "name": "NVIDIA", "shares": 15, "base_date": "2026-03-02" }
+    { "symbol": "1770.T", "name": "藤田エンジニアリング", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "5830.T", "name": "いよぎんHD", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "5831.T", "name": "しずおかFG", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "7134.T", "name": "アップガレージG", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "7184.T", "name": "富山第一銀行", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "7282.T", "name": "豊田合成", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "7565.T", "name": "萬世電機", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "7609.T", "name": "ダイトロン", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "7986.T", "name": "日本アイ・エス・ケイ", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "8005.T", "name": "スクロール", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "8137.T", "name": "サンワテクノス", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "9702.T", "name": "アイ・エス・ビー", "shares": 100, "base_date": "2026-10-01" },
+    { "symbol": "9934.T", "name": "因幡電機産業", "shares": 100, "base_date": "2026-10-01" }
   ]
 }
