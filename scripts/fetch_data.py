@@ -16,6 +16,8 @@ from pathlib import Path
 
 import yfinance as yf
 
+JST = timezone(timedelta(hours=9))
+
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "config" / "portfolio.json"
 OUT = ROOT / "data" / "market.json"
@@ -56,7 +58,8 @@ def guess_currency(symbol: str) -> str:
 
 
 def fetch_one(symbol: str, start: date):
-    """(dates, closes, currency) を返す。失敗時は例外。"""
+    """(dates, closes, currency, intraday) を返す。失敗時は例外。
+    intraday は直近の値を5分足で補ったときだけ {"date", "asof"}、それ以外は None。"""
     last_err = None
     for attempt in range(1, RETRIES + 1):
         try:
@@ -74,21 +77,31 @@ def fetch_one(symbol: str, start: date):
             if not rows:
                 raise RuntimeError("no valid rows")
             # Yahoo の日足は、日本の指数・株などで直近日の行が欠けることがある。
-            # 1時間足（直近5日）の各日の最終値で、日足にない日付だけを補う。
+            # 5分足（直近5日）の各日の最終値で、日足にない日付だけを補い、
+            # 補った値には「何時時点か」を記録する。
+            intraday = None
             try:
-                intra = t.history(period="5d", interval="60m", auto_adjust=False, actions=False)
+                intra = t.history(period="5d", interval="5m", auto_adjust=False, actions=False)
                 if intra is not None and not intra.empty and "Close" in intra:
                     last_by_day = {}
                     for ts, row in intra[["Close"]].dropna().iterrows():
                         v = float(row["Close"])
                         if math.isfinite(v):
-                            last_by_day[ts.date().isoformat()] = v  # 時刻順なので最後が残る
+                            last_by_day[ts.date().isoformat()] = (v, ts)  # 時刻順なので最後が残る
                     added = [d for d in last_by_day
                              if d not in rows and d > min(rows) and date.fromisoformat(d).weekday() < 5]
                     for d in added:
-                        rows[d] = last_by_day[d]
+                        rows[d] = last_by_day[d][0]
                     if added:
-                        print(f"  [{symbol}] filled from intraday: {', '.join(sorted(added))}")
+                        last_added = max(added)
+                        if last_added == max(rows):
+                            # 足の時刻は「開始時刻」。値の時点は 足の開始+5分 と 取得時刻 の早い方
+                            bar_start = last_by_day[last_added][1].to_pydatetime()
+                            asof = min(bar_start + timedelta(minutes=5), datetime.now(timezone.utc))
+                            intraday = {"date": last_added,
+                                        "asof": asof.astimezone(JST).isoformat(timespec="minutes")}
+                        print(f"  [{symbol}] filled from intraday: {', '.join(sorted(added))}"
+                              + (f" (as of {intraday['asof']})" if intraday else ""))
             except Exception as e:  # noqa: BLE001
                 print(f"  [{symbol}] intraday supplement skipped: {e}", file=sys.stderr)
             currency = None
@@ -97,7 +110,7 @@ def fetch_one(symbol: str, start: date):
             except Exception:
                 pass
             dates = sorted(rows)
-            return dates, [rows[d] for d in dates], currency
+            return dates, [rows[d] for d in dates], currency, intraday
         except Exception as e:  # noqa: BLE001
             last_err = e
             print(f"  [{symbol}] attempt {attempt} failed: {e}", file=sys.stderr)
@@ -157,7 +170,7 @@ def main() -> int:
         sym = tgt["symbol"]
         print(f"fetch {sym} from {start}")
         try:
-            dates, closes, cur = fetch_one(sym, start)
+            dates, closes, cur, intraday = fetch_one(sym, start)
             currency = tgt.get("currency") or cur or guess_currency(sym)
             digits = tgt.get("digits") if tgt.get("digits") is not None else sig_digits(closes)
             series[sym] = {
@@ -168,6 +181,9 @@ def main() -> int:
                 "close": round_series(closes, digits),
                 "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             }
+            if intraday:
+                # 直近の値が5分足で補った値であることと、その時点（日本時間）
+                series[sym]["intraday"] = intraday
             ok += 1
         except Exception as e:  # noqa: BLE001
             print(f"  !! {e} -> keep previous data", file=sys.stderr)

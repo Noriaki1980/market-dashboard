@@ -47,6 +47,10 @@ h2 .jp{font-family:var(--sans);letter-spacing:.04em;text-transform:none;margin-l
 .card .chg .lb{color:var(--muted);margin-right:3px}
 .card .spark{height:36px;margin-top:4px}
 @media (max-width:520px){.card .px{font-size:18px}.card{padding:8px 10px 6px}}
+.card .nm .sym.live,td .sub.live{color:var(--amber)}
+.card .nm>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.card .nm .sym{white-space:nowrap;flex-shrink:0}
+@media (max-width:520px){.card .nm .sym .code{display:none}}
 .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)}
 
 /* controls */
@@ -249,6 +253,9 @@ const arrow = r => r == null || !isFinite(r) || Math.abs(r) < 1e-12 ? "" : r > 0
 const autoDigits = v => { const a = Math.abs(v); return a >= 1000 ? 1 : a >= 100 ? 2 : a >= 1 ? 3 : 5; };
 const parseD = s => new Date(s + "T00:00:00Z");
 const isoD = d => d.toISOString().slice(0, 10);
+// 直近の値が5分足で補った値なら、その時点（日本時間 HH:MM）を返す
+const asofTime = (sym, d) => { const s = DATA && DATA.series[sym]; const it = s && s.intraday; return it && it.date === d && it.asof ? it.asof.slice(11, 16) : null; };
+const dateLabel = (sym, d, short) => { const t = asofTime(sym, d); const ds = short ? d.slice(5).replace("-", "/") : d; return t ? `${ds} ${t}時点` : ds; };
 const weekKey = s => { const d = parseD(s); const wd = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - wd); return isoD(d); };
 const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const toast = msg => { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 1800); };
@@ -346,7 +353,7 @@ function renderCards() {
     if (!s || !s.dates.length) { card.append(el("div", { class: "nm", text: sym }), el("div", { class: "px", text: "—" })); box.append(card); continue; }
     const m = metrics(s);
     card.append(
-      el("div", { class: "nm" }, el("span", { text: s.name }), el("span", { class: "sym", text: `${sym} · ${m.lastD.slice(5).replace("-", "/")}${s.stale ? "(旧)" : ""}` })),
+      el("div", { class: "nm" }, el("span", { text: s.name }), el("span", { class: "sym" + (asofTime(sym, m.lastD) ? " live" : "") }, el("span", { class: "code", text: sym + " · " }), `${dateLabel(sym, m.lastD, true)}${s.stale ? "(旧)" : ""}`)),
       el("div", { class: "px", text: fmtN(m.last, dg) }),
       el("div", { class: "chg" },
         el("span", { class: cls(m.d) }, el("span", { class: "lb", text: "前日" }), `${arrow(m.d)}${fmtA(m.dChg, dg)} (${fmtP(m.d)})`),
@@ -375,7 +382,7 @@ function renderMarketChart() {
   let r = sliceRange(s, prefs.range); let dates = r.dates, vals = r.close;
   if (prefs.mfreq === "W") { const w = toWeekly(dates, vals); dates = w.dates; vals = w.vals; }
   const m = metrics(s);
-  $("mc-title").replaceChildren(document.createTextNode(s.name), el("span", { class: "sub", text: `${prefs.sel}  ${fmtN(m.last, dg)}  (${m.lastD})` }));
+  $("mc-title").replaceChildren(document.createTextNode(s.name), el("span", { class: "sub", text: `${prefs.sel}  ${fmtN(m.last, dg)}  (${dateLabel(prefs.sel, m.lastD)}${asofTime(prefs.sel, m.lastD) ? "・暫定" : ""})` }));
   const first = vals[0], last = vals[vals.length - 1], chg = first ? last / first - 1 : null;
   const hi = Math.max(...vals), lo = Math.min(...vals);
   $("mc-stats").replaceChildren(
@@ -568,7 +575,7 @@ function renderHoldingsTable(rows) {
       el("td", { class: "num " + cls(r.since), style: "font-weight:600", text: fmtP(r.since) }),
       el("td", { class: "num " + cls(r.d), text: fmtP(r.d) }),
       el("td", { class: "num " + cls(r.w), text: fmtP(r.w) }),
-      el("td", { class: "num" }, fmtN(r.last, dg), el("span", { class: "sub", text: r.lastD })),
+      el("td", { class: "num" }, fmtN(r.last, dg), el("span", { class: "sub" + (asofTime(r.h.symbol, r.lastD) ? " live" : ""), text: dateLabel(r.h.symbol, r.lastD) })),
       el("td", {}, shIn),
       el("td", { class: "num" }, r.shares && r.cost != null ? fmtN(r.cost, 0) : "—", r.shares && r.cost != null && r.origCur !== "JPY" ? el("span", { class: "sub", text: `@${fmtN(valueAt(DATA.series[FX_FOR[r.origCur]], r.effBase), 2)}` }) : null),
       el("td", { class: "num" }, r.shares && r.mv != null ? fmtN(r.mv, 0) : "—", r.shares && r.mv != null && r.origCur !== "JPY" ? el("span", { class: "sub", text: `@${fmtN(fxLatest(r.origCur), 2)}` }) : null),
@@ -867,7 +874,7 @@ async function boot() {
   $("banner").textContent = msgs.join(" / ");
   $("foot").innerHTML = "";
   $("foot").append(
-    el("div", { text: "出典: Yahoo Finance（yfinance 経由の日足終値）。市場が開いている時間帯の取得では、最終行はその時点の値（暫定）です。前週末比 = 直近値 ÷ 前週最終営業日の終値 − 1。" }),
+    el("div", { text: "出典: Yahoo Finance（yfinance 経由の日足終値）。日足に直近日がない場合は5分足で補い、「11/17 12:30時点」のように時点（日本時間）を表示します（暫定値。Yahoo側の配信遅延を含みます）。それ以外でも、市場が開いている時間帯の取得では最終行はその時点の値（暫定）です。前週末比 = 直近値 ÷ 前週最終営業日の終値 − 1。" }),
     el("div", { text: "投資判断の参考情報であり、正確性・完全性は保証されません。" }));
   Chart.defaults.color = C("--text-2"); Chart.defaults.font.family = "IBM Plex Sans JP";
   renderCards(); renderMarketChart(); bindControls(); renderPortfolio(); syncConfigView(); setupEditLink();
