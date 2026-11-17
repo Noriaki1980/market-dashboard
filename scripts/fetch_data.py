@@ -73,6 +73,24 @@ def fetch_one(symbol: str, start: date):
                     rows[ts.date().isoformat()] = v
             if not rows:
                 raise RuntimeError("no valid rows")
+            # Yahoo の日足は、日本の指数・株などで直近日の行が欠けることがある。
+            # 1時間足（直近5日）の各日の最終値で、日足にない日付だけを補う。
+            try:
+                intra = t.history(period="5d", interval="60m", auto_adjust=False, actions=False)
+                if intra is not None and not intra.empty and "Close" in intra:
+                    last_by_day = {}
+                    for ts, row in intra[["Close"]].dropna().iterrows():
+                        v = float(row["Close"])
+                        if math.isfinite(v):
+                            last_by_day[ts.date().isoformat()] = v  # 時刻順なので最後が残る
+                    added = [d for d in last_by_day
+                             if d not in rows and d > min(rows) and date.fromisoformat(d).weekday() < 5]
+                    for d in added:
+                        rows[d] = last_by_day[d]
+                    if added:
+                        print(f"  [{symbol}] filled from intraday: {', '.join(sorted(added))}")
+            except Exception as e:  # noqa: BLE001
+                print(f"  [{symbol}] intraday supplement skipped: {e}", file=sys.stderr)
             currency = None
             try:
                 currency = t.fast_info.get("currency")
