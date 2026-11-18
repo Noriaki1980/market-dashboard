@@ -1,0 +1,12 @@
+{
+  "markets": [
+    { "symbol": "^N225", "name": "日経平均" },
+    { "symbol": "^DJI", "name": "NYダウ" },
+    { "symbol": "^GSPC", "name": "S&P500" },
+    { "symbol": "JPY=X", "name": "ドル円" },
+    { "symbol": "EURJPY=X", "name": "ユーロ円" },
+    { "symbol": "GBPJPY=X", "name": "ポンド円" },
+    { "symbol": "AUDJPY=X", "name": "豪ドル円" },
+    { "symbol": "AUDUSD=X", "name": "豪ドル/米ドル" }
+  ]
+}

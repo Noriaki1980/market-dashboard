@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sys
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -20,10 +21,11 @@ JST = timezone(timedelta(hours=9))
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "config" / "portfolio.json"
+MARKETS_CONFIG = ROOT / "config" / "markets.json"
 OUT = ROOT / "data" / "market.json"
 
-# 市場サマリーに表示する指標（順番 = 表示順）
-MARKETS = [
+# 市場サマリーに表示する指標の既定値（config/markets.json がないときに使う。順番 = 表示順）
+DEFAULT_MARKETS = [
     {"symbol": "^N225",    "name": "日経平均",     "kind": "index", "currency": "JPY", "digits": 2},
     {"symbol": "^DJI",     "name": "NYダウ",       "kind": "index", "currency": "USD", "digits": 2},
     {"symbol": "^GSPC",    "name": "S&P500",       "kind": "index", "currency": "USD", "digits": 2},
@@ -34,6 +36,64 @@ MARKETS = [
     {"symbol": "AUDUSD=X", "name": "豪ドル/米ドル", "kind": "fx",    "currency": "USD", "digits": 5},
 ]
 
+# 表示しなくても常に取得するもの（ポートフォリオの比較指数・円換算用）
+REQUIRED = ["^N225", "^DJI", "^GSPC", "JPY=X", "EURJPY=X", "GBPJPY=X", "AUDJPY=X"]
+
+FX_NAMES = {"USD": "ドル", "EUR": "ユーロ", "GBP": "ポンド", "AUD": "豪ドル", "NZD": "NZドル", "CAD": "カナダドル",
+            "CHF": "スイスフラン", "CNY": "人民元", "CNH": "人民元", "HKD": "香港ドル", "SGD": "シンガポールドル",
+            "ZAR": "南アランド", "MXN": "メキシコペソ", "TRY": "トルコリラ", "KRW": "ウォン", "INR": "ルピー",
+            "SEK": "スウェーデンクローナ", "NOK": "ノルウェークローネ", "BRL": "レアル", "JPY": "円"}
+
+
+def fx_jpy_symbol(cur: str) -> str:
+    """その通貨の対円レートの Yahoo シンボル（USD は JPY=X）"""
+    return "JPY=X" if cur == "USD" else f"{cur}JPY=X"
+
+
+def normalize_symbol(raw: str) -> str:
+    """通貨ペアの書き方（CHFJPY / EUR/USD / USDJPY=X）を Yahoo 形式に。その他はそのまま"""
+    x = re.sub(r"\s+", "", raw).upper() if re.fullmatch(r"[A-Za-z/=_\-\s]+", raw.strip()) else raw.strip()
+    pair = re.sub(r"[/\-_]", "", x)
+    pair = pair[:-2] if pair.endswith("=X") else pair
+    if re.fullmatch(r"[A-Z]{6}", pair) and ("/" in x or x.endswith("=X") or re.fullmatch(r"[A-Z]{6}", x)):
+        return pair[3:] + "=X" if pair.startswith("USD") else pair + "=X"   # Yahoo では USD/xxx は xxx=X
+    return x
+
+
+def describe_market(m: dict) -> dict:
+    """markets.json の1項目を補完（name / kind / currency / digits）"""
+    sym = normalize_symbol(m["symbol"])
+    out = {"symbol": sym}
+    if sym.endswith("=X"):
+        pair = sym[:-2]
+        base, quote = ("USD", pair) if len(pair) == 3 else (pair[:3], pair[3:6])
+        out.update(kind="fx", currency=quote,
+                   name=m.get("name") or (f"{FX_NAMES.get(base, base)}円" if quote == "JPY"
+                                          else f"{FX_NAMES.get(base, base)}/{FX_NAMES.get(quote, quote)}"),
+                   digits=m.get("digits", 3 if quote == "JPY" else 5))
+    else:
+        out.update(kind="index" if sym.startswith("^") else "equity",
+                   currency=m.get("currency"), name=m.get("name") or sym, digits=m.get("digits"))
+    return out
+
+
+def load_markets() -> list[dict]:
+    cfg = load_json(MARKETS_CONFIG, None)
+    items = cfg.get("markets") if isinstance(cfg, dict) else None
+    if not isinstance(items, list) or not items:
+        return DEFAULT_MARKETS
+    res, seen = [], set()
+    for m in items:
+        if isinstance(m, str):
+            m = {"symbol": m}
+        if not isinstance(m, dict) or not (m.get("symbol") or "").strip() or m["symbol"].strip() in seen:
+            continue
+        d = describe_market(m)
+        seen.add(d["symbol"])
+        res.append(d)
+    return res or DEFAULT_MARKETS
+
+
 MARKET_HISTORY_DAYS = 365 * 2 + 30   # 市場チャートは最大2年
 RETRIES = 3
 
@@ -43,6 +103,16 @@ def load_json(path: Path, default):
         return json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         return default
+
+
+def all_holdings(config):
+    """全ポートフォリオの銘柄を (holding, default_base_date) で返す。旧形式（holdings 直下）も可"""
+    pfs = config.get("portfolios")
+    if not isinstance(pfs, list):
+        pfs = [config]
+    for pf in pfs:
+        for h in pf.get("holdings", []) or []:
+            yield h, pf.get("default_base_date")
 
 
 def guess_currency(symbol: str) -> str:
@@ -106,6 +176,12 @@ def fetch_one(symbol: str, start: date):
                             "filled": last_d in added,                            # 5分足で補った値か
                             "live": (now - asof) <= timedelta(minutes=40),        # 取引中（暫定値）か
                         }
+                        # 東証の銘柄は、引け後なら日足の値は 15:30 の終値。最後の5分足が早い時刻
+                        # （出来高の少ない銘柄など）でも時点は 15:30 とする
+                        if (symbol.endswith(".T") or symbol == "^N225") and not intraday["live"]:
+                            close_jst = datetime.fromisoformat(last_d + "T15:30:00+09:00")
+                            if asof.astimezone(JST) < close_jst <= now.astimezone(JST) - timedelta(minutes=15):
+                                intraday["asof"] = close_jst.isoformat(timespec="minutes")
                         print(f"  [{symbol}] last {last_d} as of {intraday['asof']}"
                               + (" (live)" if intraday["live"] else ""))
             except Exception as e:  # noqa: BLE001
@@ -148,8 +224,8 @@ def main() -> int:
     market_start = today - timedelta(days=MARKET_HISTORY_DAYS)
 
     base_dates = []
-    for h in config.get("holdings", []):
-        bd = h.get("base_date") or config.get("default_base_date")
+    for h, default_bd in all_holdings(config):
+        bd = h.get("base_date") or default_bd
         if bd:
             try:
                 base_dates.append(date.fromisoformat(bd))
@@ -159,11 +235,17 @@ def main() -> int:
     # 市場系列もPFの基準日より前まで取る（ベンチマーク比較・円換算のため）
     start = min(market_start, pf_start)
 
+    markets = load_markets()
     targets = []
-    for m in MARKETS:
+    for m in markets:
         targets.append({**m, "role": "market"})
-    seen = {m["symbol"] for m in MARKETS}
-    for h in config.get("holdings", []):
+    seen = {m["symbol"] for m in markets}
+    defaults = {m["symbol"]: m for m in DEFAULT_MARKETS}
+    for sym in REQUIRED:
+        if sym not in seen:
+            seen.add(sym)
+            targets.append({**(defaults.get(sym) or describe_market({"symbol": sym})), "role": "aux"})
+    for h, _ in all_holdings(config):
         s = (h.get("symbol") or "").strip()
         if not s or s in seen:
             continue
@@ -198,6 +280,26 @@ def main() -> int:
                 prev["stale"] = True
                 series[sym] = prev
 
+    # 保有銘柄の通貨（USD/EUR/GBP/AUD 以外も）を円換算できるよう、対円レートを追加で取得
+    holding_syms = {t["symbol"] for t in targets if t["role"] == "holding"}
+    for cur in sorted({series[k].get("currency") for k in holding_syms if k in series} - {None, "JPY"}):
+        fsym = fx_jpy_symbol(cur)
+        if fsym in series:
+            continue
+        print(f"fetch {fsym} (for {cur} holdings)")
+        try:
+            dates, closes, _, intraday = fetch_one(fsym, start)
+            series[fsym] = {"name": f"{FX_NAMES.get(cur, cur)}円", "kind": "fx", "currency": "JPY", "dates": dates,
+                            "close": round_series(closes, 4),
+                            "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+            if intraday:
+                series[fsym]["intraday"] = intraday
+            ok += 1
+        except Exception as e:  # noqa: BLE001
+            print(f"  !! {e}", file=sys.stderr)
+            if fsym in previous:
+                series[fsym] = {**previous[fsym], "stale": True}
+
     if ok == 0:
         print("all fetches failed; data not updated", file=sys.stderr)
         return 1
@@ -212,13 +314,13 @@ def main() -> int:
     out = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source": "Yahoo Finance (yfinance) 日足終値",
-        "markets": [m["symbol"] for m in MARKETS],
-        "market_meta": {m["symbol"]: {"digits": m["digits"]} for m in MARKETS},
+        "markets": [m["symbol"] for m in markets],
+        "market_meta": {m["symbol"]: {"digits": m.get("digits"), "name": m["name"]} for m in markets},
         "series": series,
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"wrote {OUT} ({ok}/{len(targets)} fetched)")
+    print(f"wrote {OUT} ({ok} fetched, {len(series)} series)")
     return 0
 
 
