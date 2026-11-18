@@ -59,7 +59,7 @@ def guess_currency(symbol: str) -> str:
 
 def fetch_one(symbol: str, start: date):
     """(dates, closes, currency, intraday) を返す。失敗時は例外。
-    intraday は直近の値を5分足で補ったときだけ {"date", "asof"}、それ以外は None。"""
+    intraday は直近値の時点情報 {"date", "asof", "filled", "live"}（5分足が取れないときは None）。"""
     last_err = None
     for attempt in range(1, RETRIES + 1):
         try:
@@ -76,9 +76,9 @@ def fetch_one(symbol: str, start: date):
                     rows[ts.date().isoformat()] = v
             if not rows:
                 raise RuntimeError("no valid rows")
-            # Yahoo の日足は、日本の指数・株などで直近日の行が欠けることがある。
-            # 5分足（直近5日）の各日の最終値で、日足にない日付だけを補い、
-            # 補った値には「何時時点か」を記録する。
+            # 5分足（直近5日）を使って
+            #  1) Yahoo の日足で直近日の行が欠けている場合（日本の指数・株で起きる）にその日の最終値で補う
+            #  2) 直近値が「何時時点」の値かを記録する（日本時間）
             intraday = None
             try:
                 intra = t.history(period="5d", interval="5m", auto_adjust=False, actions=False)
@@ -93,15 +93,21 @@ def fetch_one(symbol: str, start: date):
                     for d in added:
                         rows[d] = last_by_day[d][0]
                     if added:
-                        last_added = max(added)
-                        if last_added == max(rows):
-                            # 足の時刻は「開始時刻」。値の時点は 足の開始+5分 と 取得時刻 の早い方
-                            bar_start = last_by_day[last_added][1].to_pydatetime()
-                            asof = min(bar_start + timedelta(minutes=5), datetime.now(timezone.utc))
-                            intraday = {"date": last_added,
-                                        "asof": asof.astimezone(JST).isoformat(timespec="minutes")}
-                        print(f"  [{symbol}] filled from intraday: {', '.join(sorted(added))}"
-                              + (f" (as of {intraday['asof']})" if intraday else ""))
+                        print(f"  [{symbol}] filled from intraday: {', '.join(sorted(added))}")
+                    last_d = max(rows)
+                    if last_d in last_by_day:
+                        # 足の時刻は「開始時刻」。値の時点は 足の開始+5分 と 取得時刻 の早い方
+                        now = datetime.now(timezone.utc)
+                        bar_start = last_by_day[last_d][1].to_pydatetime()
+                        asof = min(bar_start + timedelta(minutes=5), now)
+                        intraday = {
+                            "date": last_d,                                       # 取引所の日付
+                            "asof": asof.astimezone(JST).isoformat(timespec="minutes"),
+                            "filled": last_d in added,                            # 5分足で補った値か
+                            "live": (now - asof) <= timedelta(minutes=40),        # 取引中（暫定値）か
+                        }
+                        print(f"  [{symbol}] last {last_d} as of {intraday['asof']}"
+                              + (" (live)" if intraday["live"] else ""))
             except Exception as e:  # noqa: BLE001
                 print(f"  [{symbol}] intraday supplement skipped: {e}", file=sys.stderr)
             currency = None
@@ -182,7 +188,7 @@ def main() -> int:
                 "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             }
             if intraday:
-                # 直近の値が5分足で補った値であることと、その時点（日本時間）
+                # 直近値が何時時点（日本時間）か、取引中の暫定値か
                 series[sym]["intraday"] = intraday
             ok += 1
         except Exception as e:  # noqa: BLE001
