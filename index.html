@@ -26,6 +26,11 @@ a{color:var(--amber)}
 header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 16px;margin-bottom:14px;border-bottom:1px solid var(--line);padding-bottom:10px}
 header h1{font-family:var(--mono);font-size:18px;letter-spacing:.12em;margin:0;color:var(--amber);font-weight:600}
 header .meta{font-family:var(--mono);font-size:12px;color:var(--text-2)}
+.hdr-r{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px 10px}
+.livestat{font-family:var(--mono);font-size:12px;color:var(--up);display:inline-flex;align-items:center;gap:6px}
+.livestat::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.livestat.warn{color:var(--amber)}
+.livestat.busy{color:var(--text-2)}
 .banner{font-size:13px;padding:8px 12px;border:1px solid var(--amber-dim);background:#1d1a12;color:#ffd99a;border-radius:6px;margin-bottom:12px}
 .banner:empty{display:none}
 section{margin-bottom:18px}
@@ -142,7 +147,11 @@ footer{font-size:12px;color:var(--muted);line-height:1.7;border-top:1px solid va
 <body>
 <header>
   <h1>MARKET&nbsp;DASHBOARD</h1>
-  <div class="meta" id="meta">読み込み中…</div>
+  <div class="hdr-r">
+    <span class="livestat" id="live-status" hidden></span>
+    <button class="btn small" id="live-refresh" type="button" hidden aria-label="最新値を取得">↻ 最新値</button>
+    <div class="meta" id="meta">読み込み中…</div>
+  </div>
 </header>
 <div class="banner" id="banner"></div>
 
@@ -1079,6 +1088,55 @@ function bindControls() {
   });
 }
 
+/* ---------- live quotes（中継サーバー経由で、開いた時点の最新値を取得） ---------- */
+const LIVE_URL_FILE = "config/live.json";
+const LIVE_INTERVAL_MS = 5 * 60 * 1000;
+const LIVE = { url: "", last: 0, busy: false };
+function setLiveStatus(text, cls) {
+  const e = $("live-status"); e.hidden = false; e.textContent = text; e.className = "livestat" + (cls ? " " + cls : "");
+}
+function applyQuote(sym, q) {
+  const s = DATA.series[sym];
+  if (!s || !s.dates.length || q == null || !isFinite(q.price) || !q.date) return false;
+  const n = s.dates.length, last = s.dates[n - 1];
+  if (q.date > last) { s.dates.push(q.date); s.close.push(q.price); }
+  else if (q.date === last) s.close[n - 1] = q.price;
+  else return false;                       // 保存データより古い値は使わない
+  s.intraday = { date: q.date, asof: q.time, live: !!q.live, src: "live" };
+  s.stale = false;
+  return true;
+}
+async function fetchLive() {
+  if (!LIVE.url || LIVE.busy) return;
+  LIVE.busy = true; setLiveStatus("最新値を取得中…", "busy");
+  const syms = Object.keys(DATA.series);
+  try {
+    const r = await fetch(LIVE.url.replace(/\/+$/, "") + "/quotes?symbols=" + encodeURIComponent(syms.join(",")), { cache: "no-store" });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+    let n = 0; for (const [sym, q] of Object.entries(j.quotes || {})) if (applyQuote(sym, q)) n++;
+    LIVE.last = Date.now();
+    const t = new Date().toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
+    const miss = Object.keys(j.errors || {}).length;
+    setLiveStatus(`最新値 ${t} 取得` + (miss ? `（${miss}件は保存データ）` : ""), miss ? "warn" : "");
+    $("live-status").title = miss ? "取得できなかった銘柄: " + Object.keys(j.errors).join(", ") : "";
+    if (n) { renderMarkets(); renderPortfolio(); }
+  } catch (e) {
+    setLiveStatus("最新値を取得できず・保存データを表示中", "warn"); $("live-status").title = String(e.message || e);
+  } finally { LIVE.busy = false; }
+}
+async function startLive() {
+  try { const c = await getJSON(LIVE_URL_FILE); LIVE.url = (c && c.quotes_url || "").trim(); } catch { LIVE.url = ""; }
+  if (!LIVE.url) return;
+  $("live-refresh").hidden = false;
+  $("live-refresh").addEventListener("click", () => fetchLive());
+  fetchLive();
+  // 表示中だけ5分おきに更新。タブに戻ってきたときも、前回から5分以上たっていれば更新
+  const tick = () => { if (document.visibilityState === "visible" && Date.now() - LIVE.last >= LIVE_INTERVAL_MS) fetchLive(); };
+  setInterval(tick, 30 * 1000);
+  document.addEventListener("visibilitychange", tick);
+}
+
 /* ---------- boot ---------- */
 async function getJSON(url) { const r = await fetch(url + "?t=" + Date.now(), { cache: "no-store" }); if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.json(); }
 async function boot() {
@@ -1092,7 +1150,7 @@ async function boot() {
   loadPortfolio();
   if (!DATA.series[prefs.sel]) prefs.sel = DATA.markets[0];
   const gen = new Date(DATA.generated_at);
-  $("meta").textContent = `更新 ${gen.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} JST · ${DATA.source}`;
+  $("meta").textContent = `保存データ ${gen.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} JST · ${DATA.source}`;
   const stale = Object.entries(DATA.series).filter(([, s]) => s.stale).map(([k]) => k);
   const ageH = (Date.now() - gen.getTime()) / 3.6e6;
   const msgs = [];
@@ -1101,11 +1159,12 @@ async function boot() {
   $("banner").textContent = msgs.join(" / ");
   $("foot").innerHTML = "";
   $("foot").append(
-    el("div", { text: "出典: Yahoo Finance（yfinance 経由の日足終値）。直近値の日時はすべて日本時間で、5分足の最後の時刻です（米国市場の終値は翌朝6:00前後、夏時間は5:00前後と表示されます）。取引中に取得した値はアンバー色・「時点」付きの暫定値です。日足に直近日がない場合は5分足で補います。時刻はYahoo側の配信遅延を含みます。前週末比 = 直近値 ÷ 前週最終営業日の終値 − 1。" }),
+    el("div", { text: "出典: Yahoo Finance（yfinance 経由の日足終値）。中継サーバーを設定している場合は、ページを開いたとき（以後、表示中は5分おき・↻ボタンでも）各指標・銘柄の最新値を取得して直近値を置き換えます。直近値の日時はすべて日本時間で、5分足の最後の時刻です（米国市場の終値は翌朝6:00前後、夏時間は5:00前後と表示されます）。取引中に取得した値はアンバー色・「時点」付きの暫定値です。日足に直近日がない場合は5分足で補います。時刻はYahoo側の配信遅延を含みます。前週末比 = 直近値 ÷ 前週最終営業日の終値 − 1。" }),
     el("div", { text: "投資判断の参考情報であり、正確性・完全性は保証されません。" }));
   Chart.defaults.color = C("--text-2"); Chart.defaults.font.family = "IBM Plex Sans JP";
   if (!marketList().some(m => m.symbol === prefs.sel)) prefs.sel = (marketList().find(m => DATA.series[m.symbol]) || {}).symbol || DATA.markets[0];
   renderCards(); renderMarketChart(); bindControls(); renderPortfolio(); syncConfigView(); setupEditLink(); bindMarketEditor();
+  startLive();
 }
 boot();
 })();
